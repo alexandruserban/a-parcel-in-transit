@@ -9,6 +9,7 @@ const Batch := preload("res://scripts/batch.gd")
 const Trees := preload("res://scripts/trees.gd")
 const Castle := preload("res://scripts/castle.gd")
 const Houses := preload("res://scripts/houses.gd")
+const Lights := preload("res://scripts/lights.gd")
 const WATER_Y := -0.32        # pond water level, below the lawn (world.js WATER_Y)
 
 const FENCE := 185.0          # inner face of the city wall
@@ -48,7 +49,8 @@ var tree_spots: Array[Vector2] = []
 var trees: Trees
 var tree_detail := 1.0       # leaf clusters in the big trees (GFX.treeDetail: 0.5 on phones)
 var water_mats: Array[ShaderMaterial] = []
-var night_glows: Array = []           # [{mat, energy}] emissive materials that light up at night
+var night_glows: Array = []
+var night_lights: Array = []          # Light3Ds shown only at night (castle, church, park)           # [{mat, energy}] emissive materials that light up at night
 var mats := {}
 var b: Batch
 var house_parts: Houses
@@ -84,6 +86,8 @@ func build() -> void:
 	_street_lights()
 	_avenue_trees()
 	_vegetation()
+	Lights.church(self)
+	Lights.park(self)
 	_mountains()
 	Castle.new().build(self)
 	trees.build_forest(self)
@@ -172,6 +176,8 @@ func _make_materials() -> void:
 	mats.depot_floor = tmat("depotfloor", Vector2(4, 4), {"rough": 0.75})
 	mats.depot_lamp = _glow(Color("#ffffff"), Color("#fff4dc"), 2.0, true)
 	mats.enamel = _std(Color("#1d4f91"), 0.3, 0.1)
+	mats.belfry_glow = _glow(Color("#121214"), Color("#ffcf8a"), 2.2)
+	mats.clock_glow = _glow(Color("#f4f1ea"), Color("#fff1d2"), 1.4)
 	mats.white = _std(Color("#f4f1ea"), 0.5)
 
 
@@ -476,6 +482,8 @@ func set_wind(strength: float, dir: Vector2) -> void:
 
 func set_night(on: bool) -> void:
 	house_parts.set_night(on)
+	for l in night_lights:
+		l.visible = on
 	for g in night_glows:
 		var e: float = g.energy if on else 0.0
 		if g.mat is ShaderMaterial:
@@ -808,10 +816,10 @@ func _church() -> void:
 		var t: Vector3 = fc[1]
 		for s in [-1.3, 1.3]:
 			var c: Vector3 = Vector3(CX, 29, 30.5) + n * 4.52 + t * s
-			b.box(I, c, Vector3(1.0, 3.2, 1.0) * (Vector3.ONE - n.abs()) + n.abs() * 0.05, mats.recess, 1.0, false)
+			b.box(I, c, Vector3(1.0, 3.2, 1.0) * (Vector3.ONE - n.abs()) + n.abs() * 0.05, mats.belfry_glow, 1.0, false)
 		var cc := Vector3(CX, 23.5, 30.5) + n * 4.55
 		var cxf := Transform3D(Basis.looking_at(-n, Vector3.UP), cc)
-		b.cylinder(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3.ZERO), Vector3.ZERO, 1.5, 1.5, 0.06, 20, mats.white, true, 1.0, false)
+		b.cylinder(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3.ZERO), Vector3.ZERO, 1.5, 1.5, 0.06, 20, mats.clock_glow, true, 1.0, false)
 		b.box(cxf, Vector3(0, 0.45, 0.08), Vector3(0.1, 1.0, 0.03), mats.iron, 1.0, false)
 		b.box(cxf, Vector3(0.3, 0, 0.09), Vector3(0.7, 0.08, 0.03), mats.iron, 1.0, false)
 	# Copper spire with a gilded cross

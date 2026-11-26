@@ -30,7 +30,9 @@ func build(world) -> void:
 	M.wood = w.mats.soffit
 	M.iron = w.mats.iron
 	M.glass = w.tmat("leadedglass", Vector2(1, 1), {"rough": 0.15, "metal": 0.3, "emission_tint": Color("#ffc47e")})
-	w.night_glows.append({"mat": M.glass, "energy": 1.0})
+	w.night_glows.append({"mat": M.glass, "energy": 2.6})
+	M.slit = w._glow(Color("#2a2622"), Color("#ffaa55"), 3.5)       # arrow slits lit from inside at night
+	M.lantern = w._glow(Color("#f6e8c8"), Color("#ffb85c"), 7.0)
 	var rock := StandardMaterial3D.new()
 	rock.albedo_color = Color("#77736c")
 	rock.roughness = 1.0
@@ -58,7 +60,7 @@ func _tower(x: float, y0: float, z: float, r: float, h: float, roof: Material) -
 	_cone_roof(x, y0 + h + 0.25, z, r + 0.7, r * 2.4, roof, 18)
 	for k in 5:
 		var xf := Transform3D(Basis(Vector3.UP, k / 5.0 * TAU + 0.3), Vector3(x, y0 + h * 0.6, z))
-		_box(xf, 0.22, 1.2, 0.1, 0, 0, r + 0.02, M.dark, false)
+		_box(xf, 0.22, 1.2, 0.1, 0, 0, r + 0.02, M.slit, false)
 
 
 ## Arch outline (gothic.js archOutline): from the left foot up the jamb, over the apex, down to the right foot
@@ -149,7 +151,8 @@ func _castle() -> void:
 	for i in 3:
 		var y: float = [10.0, 17.0, 24.0][i]
 		var a := to_town + (i - 1) * 0.35
-		_window_at(kx + cos(a) * KR, y0 + y, kz + sin(a) * KR, PI / 2 - a, 0.8, 2.4, 0.16, 0.16)
+		var kr := KR * 1.05 - KR * 0.05 * (y + 3.0) / (KH + 3.0)   # the keep's radius at this height (it tapers)
+		_window_at(kx + cos(a) * kr, y0 + y, kz + sin(a) * kr, PI / 2 - a, 0.8, 2.4, 0.16, 0.16)
 	# the town banner on a pole above the spire
 	var pole_top := y0 + KH + 13.5
 	_box(Transform3D.IDENTITY, 0.12, 4, 0.12, kx, pole_top + 1.5, kz, M.iron, false)
@@ -168,8 +171,50 @@ func _castle() -> void:
 		var s := 2.0 + rng.randf() * 3.5
 		var xf := Transform3D(Basis(Vector3.UP, rng.randf() * 3.0).scaled(Vector3(s, s * (0.6 + rng.randf() * 0.6), s)), Vector3(x, w.mountain_height(x, z) + 0.5, z))
 		b.mesh(xf, rock_mesh, M.rock, true, true)
+	_night_lights(cx, cz, y0, to_town, R, kx, kz, KH)
 	_track(cx + cos(to_town) * (R + 4), cz + sin(to_town) * (R + 4))
 	_forest(cx, cz)
+
+
+## Night: floodlights on the walls, gatehouse and keep facing the town, a light in the courtyard and one at the
+## top of the keep, and lanterns on the curtain walls, so the castle shows up on its hill after dark
+func _night_lights(cx: float, cz: float, y0: float, to_town: float, R: float, kx: float, kz: float, KH: float) -> void:
+	var out := Vector3(cos(to_town), 0, sin(to_town))
+	var side := Vector3(-out.z, 0, out.x)
+	var base := Vector3(cx, y0 + 0.6, cz) + out * (R + 7.0)
+	for s in [-1.0, 0.0, 1.0]:
+		var at: Vector3 = base + side * s * 14.0
+		var target: Vector3 = Vector3(kx, y0 + (24.0 if s == 0.0 else 9.0), kz) + side * s * 6.0
+		_light(SpotLight3D.new(), at, target, Color("#ffd8a0"), 12.0, 80.0, 30.0)
+	_light(OmniLight3D.new(), Vector3(cx, y0 + 8.0, cz), Vector3.ZERO, Color("#ffc98a"), 3.0, 32.0)
+	_light(OmniLight3D.new(), Vector3(kx, y0 + KH + 3.0, kz), Vector3.ZERO, Color("#ffc98a"), 4.0, 14.0)
+	# lanterns on the outer face of every other curtain wall
+	var N := 12
+	var step := TAU / N
+	var ap := R * cos(step / 2)
+	for i in range(1, N, 2):
+		var a := (i + 0.5) * step
+		var g := _cg(cx + cos(a) * ap, y0, cz + sin(a) * ap, a)
+		_box(g, 0.5, 0.7, 0.5, 0, 8.6, 1.45, M.lantern, false)
+
+
+func _light(l: Light3D, at: Vector3, target: Vector3, col: Color, energy: float, range_m: float, angle := 0.0) -> void:
+	l.light_color = col
+	l.light_energy = energy
+	l.visible = false
+	if l is SpotLight3D:
+		(l as SpotLight3D).spot_range = range_m
+		(l as SpotLight3D).spot_angle = angle
+		(l as SpotLight3D).spot_angle_attenuation = 0.8
+	else:
+		(l as OmniLight3D).omni_range = range_m
+		(l as OmniLight3D).omni_attenuation = 1.2
+	w.add_child(l)
+	if l is SpotLight3D:
+		l.look_at_from_position(at, target, Vector3.UP)
+	else:
+		l.position = at
+	w.night_lights.append(l)
 
 
 ## Gatehouse: a square tower astride the wall with a pointed archway, portcullis and battlements
@@ -194,6 +239,9 @@ func _gatehouse(g: Transform3D, seg_l: float) -> void:
 	for y in [10.0, 13.0]:
 		for uu in [-2.2, 2.2]:
 			_box(g, 0.5, 1.4, 0.1, uu, y, 4.62, M.dark, false)
+	for s in [-1.0, 1.0]:   # lanterns either side of the gateway
+		_box(g, 0.12, 0.12, 0.5, s * 2.9, 5.6, 4.85, M.iron, false)
+		_box(g, 0.45, 0.65, 0.45, s * 2.9, 5.3, 5.1, M.lantern, false)
 	var arms: Material = w.tmat("arms", Vector2(1, 1), {"rough": 0.8})
 	b.polygon(g * Transform3D(Basis(), Vector3(0, 7.2, 4.63)), PackedVector2Array([Vector2(-0.7, -0.875), Vector2(0.7, -0.875), Vector2(0.7, 0.875), Vector2(-0.7, 0.875)]), arms, 1.0, false, Rect2(-0.7, -0.875, 1.4, 1.75))
 
