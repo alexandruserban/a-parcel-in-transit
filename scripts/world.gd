@@ -8,6 +8,7 @@ extends Node3D
 const Batch := preload("res://scripts/batch.gd")
 const Trees := preload("res://scripts/trees.gd")
 const Castle := preload("res://scripts/castle.gd")
+const Houses := preload("res://scripts/houses.gd")
 const WATER_Y := -0.32        # pond water level, below the lawn (world.js WATER_Y)
 
 const FENCE := 185.0          # inner face of the city wall
@@ -50,6 +51,7 @@ var water_mats: Array[ShaderMaterial] = []
 var night_glows: Array = []           # [{mat, energy}] emissive materials that light up at night
 var mats := {}
 var b: Batch
+var house_parts: Houses
 var body: StaticBody3D
 var rng := RandomNumberGenerator.new()
 
@@ -62,12 +64,13 @@ func build() -> void:
 	rng.seed = 20251126
 	body = StaticBody3D.new()
 	body.name = "Solids"
-	add_child(body)
 	var floor_shape := CollisionShape3D.new()
 	floor_shape.shape = WorldBoundaryShape3D.new()
 	body.add_child(floor_shape)
 	b = Batch.new()
 	_make_materials()
+	house_parts = Houses.new()
+	house_parts.setup(self)
 	trees = Trees.new(self)
 	_residents()
 	_plan()
@@ -85,7 +88,9 @@ func build() -> void:
 	Castle.new().build(self)
 	trees.build_forest(self)
 	var cards: int = trees.commit(self)
+	add_child(body)   # only now: adding thousands of shapes to a body already in the tree rebuilds it every time
 	var n := b.commit(self)
+	n += house_parts.commit(self)
 	print("World built: %d batched meshes, %d leaf cards, %d trees, %d solids, %d interactables" % [n, cards, trees.spots.size(), solids.size(), interactables.size()])
 
 
@@ -320,6 +325,28 @@ func solid(xf: Transform3D, center: Vector3, size: Vector3) -> void:
 	solids.append({"rect": rect(wc.x - hx, wc.z - hz, wc.x + hx, wc.z + hz), "bottom": wc.y - hy, "top": wc.y + hy})
 
 
+## Solids within r of (x, z), from a 16 m grid (rebuilt when solids were added since the last query)
+var _solid_grid := {}
+var _solid_grid_n := -1
+func solids_near(x: float, z: float, r: float) -> Array:
+	if _solid_grid_n != solids.size():
+		_solid_grid.clear()
+		_solid_grid_n = solids.size()
+		for s in solids:
+			var rr: Rect2 = s.rect
+			for cx in range(floori(rr.position.x / 16.0), floori(rr.end.x / 16.0) + 1):
+				for cz in range(floori(rr.position.y / 16.0), floori(rr.end.y / 16.0) + 1):
+					var key := Vector2i(cx, cz)
+					if not _solid_grid.has(key):
+						_solid_grid[key] = []
+					_solid_grid[key].append(s)
+	var out: Array = []
+	for cx in range(floori((x - r) / 16.0), floori((x + r) / 16.0) + 1):
+		for cz in range(floori((z - r) / 16.0), floori((z + r) / 16.0) + 1):
+			out.append_array(_solid_grid.get(Vector2i(cx, cz), []))
+	return out
+
+
 func solid_cyl(x: float, z: float, r: float, h: float, y0 := 0.0) -> void:
 	var cs := CollisionShape3D.new()
 	var c := CylinderShape3D.new()
@@ -439,6 +466,7 @@ func random_spot(range_m: float) -> Vector2:
 
 
 func set_night(on: bool) -> void:
+	house_parts.set_night(on)
 	for g in night_glows:
 		var e: float = g.energy if on else 0.0
 		if g.mat is ShaderMaterial:
@@ -701,91 +729,20 @@ func _house(idx: int, x: float, z: float, rot: float, cfg: Dictionary) -> void:
 	tree_block.append(local_rect(xf, 0, 12.0, 16, 10))
 	house_rects.append(local_rect(xf, 0, 0, W, D))
 
-	# Body on a stone plinth (solid for now: interiors come in a later iteration)
-	bx(xf, 0, H / 2, 0, W, H, D, wall, true)
-	bx(xf, 0, 0.3, 0, W + 0.14, 0.6, D + 0.14, mats.sandstone)
-
-	# Gable roof: ridge front-to-back (gable to the street) or along the street
-	var t := tan(st.pitch)
-	var e := 0.6
-	var verge := 0.0 if gothic else 0.45
-	var rmat := roof_mat(st.roof)
-	var half: float
-	var rise: float
-	if st.ridge_z:
-		half = W / 2
-		rise = half * t
-		var L := D / 2 + verge
-		var yl := H - e * t
-		b.quad(xf, Vector3(-half - e, yl, -L), Vector3(-half - e, yl, L), Vector3(0, H + rise, L), Vector3(0, H + rise, -L), rmat, Vector3(-1, 1, 0))
-		b.quad(xf, Vector3(half + e, yl, -L), Vector3(half + e, yl, L), Vector3(0, H + rise, L), Vector3(0, H + rise, -L), rmat, Vector3(1, 1, 0))
-		b.tri(xf, Vector3(-half, H, D / 2), Vector3(half, H, D / 2), Vector3(0, H + rise, D / 2), wall, Vector3.BACK)
-		b.tri(xf, Vector3(-half, H, -D / 2), Vector3(half, H, -D / 2), Vector3(0, H + rise, -D / 2), wall, Vector3.FORWARD)
-		bx(xf, 0, H + rise + 0.05, 0, 0.3, 0.2, 2 * L + 0.1, mats.dark_oak)
-	else:
-		half = D / 2
-		rise = half * t
-		var L := W / 2 + verge
-		var yl := H - e * t
-		b.quad(xf, Vector3(-L, yl, half + e), Vector3(L, yl, half + e), Vector3(L, H + rise, 0), Vector3(-L, H + rise, 0), rmat, Vector3(0, 1, 1))
-		b.quad(xf, Vector3(-L, yl, -half - e), Vector3(L, yl, -half - e), Vector3(L, H + rise, 0), Vector3(-L, H + rise, 0), rmat, Vector3(0, 1, -1))
-		b.tri(xf, Vector3(W / 2, H, -half), Vector3(W / 2, H, half), Vector3(W / 2, H + rise, 0), wall, Vector3.RIGHT)
-		b.tri(xf, Vector3(-W / 2, H, -half), Vector3(-W / 2, H, half), Vector3(-W / 2, H + rise, 0), wall, Vector3.LEFT)
-		bx(xf, 0, H + rise + 0.05, 0, 2 * L + 0.1, 0.2, 0.3, mats.dark_oak)
-		# Attic windows in the side gable
-		var fr := face_xf(xf, 1)
-		for u in [-1.4, 1.4]:
-			_window(fr, u, H + 1.6, 0.8, 1.1, st)
-
+	# Hollow two-storey shell with furnished rooms, stairs, front door, garage, roof and facade (houses.gd)
+	var roof: Dictionary = house_parts.build(idx, xf, st, cfg, wall)
 	var front := face_xf(xf, 0)
-	if gothic:
-		_gothic_front(xf, front, st, rise, wall)
-	else:
-		if st.timber:
-			_fachwerk(xf, st, rise)
-		if st.ridge_z:
-			# Attic windows in the street gable
-			for u in [-1.4, 1.4]:
-				_window(front, u, H + 1.6, 0.8, 1.1, st)
-			_window(front, 0, H + 4.2, 0.6, 0.8, st)
-
-	# Windows: front, sides and back
-	var ground_u := [-5.5, -3.0, 3.0, 5.5]
-	var upper_u := [-5.5, -2.75, 0.0, 2.75, 5.5]
-	if not gothic:
-		for u in ground_u:
-			_window(front, u, 1.75, 1.1, 1.4, st)
-	for u in upper_u:
-		if gothic:
-			_lancet(front, u, 4.4, 0.8, 2.0, st)
-		else:
-			_window(front, u, 4.75, 1.1, 1.4, st)
-	var side_f := face_xf(xf, 1)   # the garage and its lean-to roof cover the other side wall
-	for u in [-4.0, 0.0, 4.0]:
-		_window(side_f, u, 1.75, 1.1, 1.4, st)
-		_window(side_f, u, 4.75, 1.1, 1.4, st)
-	var back := face_xf(xf, 2)
-	for u in [-5.0, -1.5, 2.0, 5.5]:
-		_window(back, u, 1.75, 1.1, 1.4, st)
-		_window(back, u, 4.75, 1.1, 1.4, st)
 
 	# Chimney through the roof
 	var ch_x := W * 0.3
 	var ch_z := D * 0.2
-	var roof_y: float = (H + rise - absf(ch_x) * t) if st.ridge_z else (H + rise - absf(ch_z) * t)
-	var ch_top := roof_y + 1.3
+	var ch_top: float = Houses.roof_y(roof, ch_x, ch_z) + 1.3
 	bx(xf, ch_x, (ch_top + H - 0.2) / 2, ch_z, 1.1, ch_top - H + 0.2, 1.1, plaster("#d9d2c4"))
 	bx(xf, ch_x, ch_top + 0.07, ch_z, 1.35, 0.14, 1.35, mats.palestone)
 
-	# Entrance: sandstone step, door frame, door, canopy, number plate, doorbell, porch lantern
-	bx(front, 0, 0.09, 0.45, 2.4, 0.18, 0.9, mats.palestone)
-	bx(front, 0, 1.3, 0.03, 1.7, 2.6, 0.08, mats.palestone)
-	bx(front, 0, 1.2, 0.08, 1.18, 2.28, 0.06, door_mat(st.door))
-	bx(front, 0.4, 1.15, 0.13, 0.08, 0.08, 0.06, mats.brass, false, false)
-	if not gothic:
-		bx(front, 0, 2.85, 0.5, 2.2, 0.1, 1.0, rmat)
-	bx(front, 0, 2.98 if not gothic else 3.2, 0.05, 0.8, 0.4, 0.04, mats.enamel, false, false)
-	label(str(cfg.number), front * Transform3D(Basis(), Vector3(0, 2.98 if not gothic else 3.2, 0.075)), 72, Color.WHITE, 0.0045)
+	# Number plate, doorbell and porch lantern by the front door
+	bx(front, 0, 2.98, 0.05, 0.8, 0.4, 0.04, mats.enamel, false, false)
+	label(str(cfg.number), front * Transform3D(Basis(), Vector3(0, 2.98, 0.075)), 72, Color.WHITE, 0.0045)
 	bx(front, 0.95, 1.3, 0.06, 0.2, 0.3, 0.12, mats.brass, false, false)
 	var bell_pos := front * Vector3(0.95, 1.3, 0.1)
 	var number: int = cfg.number
@@ -796,17 +753,7 @@ func _house(idx: int, x: float, z: float, rot: float, cfg: Dictionary) -> void:
 	bx(front, -1.2, 2.25, 0.33, 0.26, 0.4, 0.37, mats.lamp, false, false)
 	bx(front, -1.2, 2.55, 0.2, 0.05, 0.05, 0.3, mats.iron, false, false)
 	lamp_sources.append(front * Vector3(-1.2, 2.3, 0.6))
-
-	# Garage against the left wall: lean-to roof, plank door
-	var gw := 7.0
-	var gx := -W / 2 - gw / 2
-	bx(xf, gx, 1.6, -1, gw, 3.2, 9, wall, true)
-	b.quad(xf, Vector3(-W / 2, 4.6, -5.8), Vector3(-W / 2, 4.6, 3.8), Vector3(-W / 2 - gw - 0.4, 3.05, 3.8), Vector3(-W / 2 - gw - 0.4, 3.05, -5.8), rmat, Vector3(-0.5, 1, 0))
-	b.tri(xf, Vector3(-W / 2 - gw, 3.2, 3.5), Vector3(-W / 2, 3.2, 3.5), Vector3(-W / 2, 4.6, 3.5), wall, Vector3.BACK)
-	b.tri(xf, Vector3(-W / 2 - gw, 3.2, -5.5), Vector3(-W / 2, 3.2, -5.5), Vector3(-W / 2, 4.6, -5.5), wall, Vector3.FORWARD)
-	bx(xf, gx, 1.35, 3.53, 5.4, 2.7, 0.08, tmat("wood_6b4a2e", Vector2(2, 2), {"rough": 0.7, "normal": "wood_nrm", "depth": 0.8}))
-	for k in 5:
-		bx(xf, gx - 2.2 + k * 1.1, 1.35, 3.58, 0.06, 2.6, 0.03, mats.dark_oak, false, false)
+	var gx := -W / 2 - 3.5
 
 	# Driveway of pavers to the pavement, garden path, front garden wall or hedge with a gate gap
 	var dl := 16.6
@@ -823,99 +770,6 @@ func _house(idx: int, x: float, z: float, rot: float, cfg: Dictionary) -> void:
 			bx(xf, c, 0.85, 17, len + 0.05, 0.1, 0.45, mats.palestone)
 	var gate := xf * Vector3(0, 0, 17)
 	gate_spots.append(Vector2(gate.x, gate.z))
-
-
-## One window on a facade frame: glass, frame, mullion cross, sill, shutters on timber houses
-func _window(f: Transform3D, u: float, y: float, w: float, h: float, st: Dictionary, _z := 0.0, shutters := true) -> void:
-	var lit := hash01(int(f.origin.x * 7 + u * 13), int(f.origin.z * 3 + y * 11)) < 0.6
-	bx(f, u, y, 0.02, w, h, 0.06, mats.glass_lit if lit else mats.glass_dark, false, false)
-	var ft := 0.09
-	bx(f, u, y + h / 2 + ft / 2, 0.06, w + 2 * ft, ft, 0.1, mats.frame, false, false)
-	bx(f, u - w / 2 - ft / 2, y, 0.06, ft, h, 0.1, mats.frame, false, false)
-	bx(f, u + w / 2 + ft / 2, y, 0.06, ft, h, 0.1, mats.frame, false, false)
-	bx(f, u, y, 0.07, 0.05, h, 0.04, mats.frame, false, false)
-	bx(f, u, y + h * 0.15, 0.07, w, 0.05, 0.04, mats.frame, false, false)
-	bx(f, u, y - h / 2 - 0.06, 0.1, w + 0.3, 0.12, 0.2, mats.palestone, false, false)
-	if shutters and st.timber and h > 1.0:
-		var sm := color_mat(st.shutter)
-		bx(f, u - w / 2 - ft - w / 4 - 0.02, y, 0.06, w / 2, h, 0.05, sm, false, false)
-		bx(f, u + w / 2 + ft + w / 4 + 0.02, y, 0.06, w / 2, h, 0.05, sm, false, false)
-
-
-## Gothic lancet: tall narrow window with a pointed head and a stone hood mould
-func _lancet(f: Transform3D, u: float, y: float, w: float, h: float, _st: Dictionary) -> void:
-	bx(f, u, y, 0.02, w, h, 0.06, mats.leaded, false, false)
-	b.tri(f, Vector3(u - w / 2, y + h / 2, 0.05), Vector3(u + w / 2, y + h / 2, 0.05), Vector3(u, y + h / 2 + w * 0.8, 0.05), mats.leaded, Vector3.BACK, 1.0, false)
-	bx(f, u - w / 2 - 0.07, y + 0.1, 0.07, 0.14, h + 0.2, 0.12, mats.palestone, false, false)
-	bx(f, u + w / 2 + 0.07, y + 0.1, 0.07, 0.14, h + 0.2, 0.12, mats.palestone, false, false)
-	bx(f, u, y - h / 2 - 0.06, 0.1, w + 0.4, 0.12, 0.2, mats.palestone, false, false)
-
-
-## Timber frame (Fachwerk): sill, floor and wall-plate beams, posts between the openings, corner braces
-func _fachwerk(xf: Transform3D, st: Dictionary, rise: float) -> void:
-	var H := HOUSE_H
-	var tm := timber(st.timber_color)
-	var y0 := 0.68 if st.frame == "full" else 3.25     # "upper": only the upper storey is framed
-	for face in 4:
-		var f := face_xf(xf, face)
-		var width := HOUSE_W if face % 2 == 0 else HOUSE_D
-		var hw := width / 2
-		for y in [0.68, 3.25, 6.35]:
-			if y >= y0:
-				bx(f, 0, y, 0.04, width, 0.18, 0.06, tm, false, false)
-		var posts: Array = []
-		if face % 2 == 0:
-			posts = [-hw + 0.1, -7.0, -4.25, -1.6, 1.6, 4.25, 7.0, hw - 0.1]
-		else:
-			posts = [-hw + 0.1, -6.0, -2.0, 2.0, 6.0, hw - 0.1]
-		for p in posts:
-			bx(f, p, (y0 + 6.35) / 2, 0.04, 0.16, 6.35 - y0, 0.06, tm, false, false)
-		# K-braces in the corner panels of the upper floor
-		for s in [-1, 1]:
-			var x0: float = s * (hw - 0.1)
-			var x1: float = s * (hw - 1.3) if face % 2 == 0 else s * (hw - 1.0)
-			var mid := Vector3((x0 + x1) / 2, (3.25 + 6.35) / 2, 0.04)
-			var dx := x1 - x0
-			var dy := 6.35 - 3.25
-			var ang := atan2(dy, dx)
-			b.box(f * Transform3D(Basis(Vector3.BACK, ang), mid), Vector3.ZERO, Vector3(sqrt(dx * dx + dy * dy), 0.15, 0.06), tm, 1.0, false)
-	# Collar beam and king post in the street gable
-	if st.ridge_z:
-		var f0 := face_xf(xf, 0)
-		var yc := H + rise * 0.42
-		bx(f0, 0, yc, 0.04, HOUSE_W * (1 - 0.42) - 0.2, 0.16, 0.06, tm, false, false)
-		bx(f0, 0, H + rise * 0.21, 0.04, 0.16, rise * 0.42, 0.06, tm, false, false)
-		for s in [-1, 1]:
-			bx(f0, s * 4.0, H + rise * 0.21, 0.04, 0.16, rise * 0.4, 0.06, tm, false, false)
-
-
-## Gothic stone front: stepped gable and a ground-floor arcade of pointed arches
-func _gothic_front(xf: Transform3D, front: Transform3D, st: Dictionary, rise: float, wall: Material) -> void:
-	var H := HOUSE_H
-	var W := HOUSE_W
-	var n := 6
-	for i in n:
-		var y0 := H + rise * i / n
-		var y1 := H + rise * (i + 1) / n
-		var w := W * (1.0 - float(i) / n) + 0.2
-		var top := y1 + 0.55
-		bx(front, 0, (y0 + top) / 2, -0.3, w, top - y0, 0.65, wall)
-		bx(front, 0, top + 0.06, -0.3, w + 0.12, 0.12, 0.8, mats.palestone)
-	# small lancets in the gable
-	_lancet(front, -1.5, H + 2.0, 0.7, 1.5, st)
-	_lancet(front, 1.5, H + 2.0, 0.7, 1.5, st)
-	_lancet(front, 0, H + 4.6, 0.6, 1.2, st)
-	# arcade: three pointed openings, the door sits in the middle one
-	for u in [-4.6, 4.6]:
-		bx(front, u, 1.45, 0.01, 3.0, 2.9, 0.04, mats.recess, false, false)
-		b.tri(front, Vector3(u - 1.5, 2.9, 0.035), Vector3(u + 1.5, 2.9, 0.035), Vector3(u, 4.0, 0.035), mats.recess, Vector3.BACK, 1.0, false)
-	for u in [-6.9, -2.3, 2.3, 6.9]:
-		bx(front, u, 1.5, 0.15, 0.45, 3.0, 0.3, mats.palestone, false)
-	bx(front, 0, 3.3, 0.12, W, 0.2, 0.25, mats.palestone, false, false)    # string course
-	bx(front, 0, 3.75, 0.55, 12.0, 0.12, 1.0, mats.palestone, false)        # balcony slab
-	for k in 25:
-		bx(front, -6 + k * 0.5, 4.2, 1.0, 0.05, 0.8, 0.05, mats.iron, false, false)
-	bx(front, 0, 4.62, 1.0, 12.0, 0.06, 0.08, mats.iron, false, false)
 
 
 # ----------------------------------------------------------------------------------------------

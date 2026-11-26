@@ -7,17 +7,38 @@ extends RefCounted
 const CHUNK := 96.0
 
 var _tools := {}
+var chunk := CHUNK
+## Vertex colour for materials marked with the "vcol" meta (many plain-coloured parts share one material)
+var color := Color.WHITE
+
+
+var _last_mat: Material
+var _last_cell := Vector3i(1 << 30, 0, 0)
+var _last_st: SurfaceTool
 
 
 func _tool(mat: Material, at: Vector3, shadow: bool) -> SurfaceTool:
-	var key := "%d:%d:%d:%d" % [mat.get_instance_id(), floori(at.x / CHUNK), floori(at.z / CHUNK), int(shadow)]
-	var entry: Variant = _tools.get(key)
-	if entry == null:
-		var st := SurfaceTool.new()
-		st.begin(Mesh.PRIMITIVE_TRIANGLES)
-		entry = {"st": st, "mat": mat, "shadow": shadow}
-		_tools[key] = entry
-	return entry["st"]
+	var cell := Vector3i(floori(at.x / chunk), floori(at.z / chunk), int(shadow))
+	var s: SurfaceTool
+	if mat == _last_mat and cell == _last_cell:
+		s = _last_st
+	else:
+		var per: Dictionary = _tools.get(mat, {})
+		if per.is_empty():
+			_tools[mat] = per
+		var entry: Variant = per.get(cell)
+		if entry == null:
+			var st := SurfaceTool.new()
+			st.begin(Mesh.PRIMITIVE_TRIANGLES)
+			entry = {"st": st, "mat": mat, "shadow": shadow}
+			per[cell] = entry
+		s = entry["st"]
+		_last_mat = mat
+		_last_cell = cell
+		_last_st = s
+	if mat.has_meta("vcol"):
+		s.set_color(color)
+	return s
 
 
 static func _v(st: SurfaceTool, p: Vector3, n: Vector3, uv: Vector2) -> void:
@@ -95,28 +116,46 @@ func tri_uv(xf: Transform3D, a: Vector3, b: Vector3, c: Vector3, ua: Vector2, ub
 
 ## Any mesh (a PrimitiveMesh or ArrayMesh, surface 0) placed with xf. UVs are kept (0..1 for primitives) and
 ## scaled by uv_mul. flat: per-face normals (faceted rocks).
+var _arrays := {}
 func mesh(xf: Transform3D, m: Mesh, mat: Material, shadow := true, flat := false, uv_mul := Vector2.ONE) -> void:
-	var arr: Array = m.surface_get_arrays(0)
-	var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
-	var norms: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
-	var uvs = arr[Mesh.ARRAY_TEX_UV]
-	var idx = arr[Mesh.ARRAY_INDEX]
+	var arr: Array = _arrays.get(m, [])
+	if arr.is_empty():
+		var a: Array = m.surface_get_arrays(0)
+		var idx: PackedInt32Array = a[Mesh.ARRAY_INDEX] if a[Mesh.ARRAY_INDEX] != null else PackedInt32Array()
+		var verts: PackedVector3Array = a[Mesh.ARRAY_VERTEX]
+		if idx.is_empty():
+			idx.resize(verts.size())
+			for i in verts.size():
+				idx[i] = i
+		var uvs: PackedVector2Array = a[Mesh.ARRAY_TEX_UV] if a[Mesh.ARRAY_TEX_UV] != null else PackedVector2Array()
+		if uvs.size() != verts.size():
+			uvs.resize(verts.size())
+		arr = [verts, a[Mesh.ARRAY_NORMAL], uvs, idx]
+		_arrays[m] = arr
+	var verts: PackedVector3Array = arr[0]
+	var norms: PackedVector3Array = arr[1]
+	var uvs: PackedVector2Array = arr[2]
+	var idx: PackedInt32Array = arr[3]
 	var nb := xf.basis.inverse().transposed()
 	var mirrored := xf.basis.determinant() < 0.0
 	var st := _tool(mat, xf.origin, shadow)
-	var count: int = idx.size() if idx != null and idx.size() > 0 else verts.size()
-	for t in range(0, count, 3):
-		var ids := [t, t + 1, t + 2]
-		if idx != null and idx.size() > 0:
-			ids = [idx[t], idx[t + 1], idx[t + 2]]
-		if mirrored:
-			ids = [ids[0], ids[2], ids[1]]
-		var P := [xf * verts[ids[0]], xf * verts[ids[1]], xf * verts[ids[2]]]
-		var fn: Vector3 = (P[2] - P[0]).cross(P[1] - P[0]).normalized()   # clockwise front faces
-		for k in 3:
-			var nn: Vector3 = fn if flat else (nb * norms[ids[k]]).normalized()
-			var uv: Vector2 = (uvs[ids[k]] * uv_mul) if uvs != null and uvs.size() > 0 else Vector2.ZERO
-			_v(st, P[k], nn, uv)
+	var P := PackedVector3Array()
+	P.resize(verts.size())
+	for i in verts.size():
+		P[i] = xf * verts[i]
+	var i1 := 2 if mirrored else 1
+	var i2 := 1 if mirrored else 2
+	for t in range(0, idx.size(), 3):
+		var a0 := idx[t]
+		var a1 := idx[t + i1]
+		var a2 := idx[t + i2]
+		var fn := Vector3.ZERO
+		if flat:
+			fn = (P[a2] - P[a0]).cross(P[a1] - P[a0]).normalized()   # clockwise front faces
+		for k in [a0, a1, a2]:
+			st.set_normal(fn if flat else (nb * norms[k]).normalized())
+			st.set_uv(uvs[k] * uv_mul)
+			st.add_vertex(P[k])
 
 
 ## Flat polygon (any simple outline in the xy plane of xf, facing +z), triangulated; UVs in metres / uv_scale
@@ -277,21 +316,69 @@ func ellipse_wall(xf: Transform3D, cx: float, cz: float, a: float, b: float, y0:
 		quad(xf, p0, p1, p1 + Vector3(0, y1 - y0, 0), p0 + Vector3(0, y1 - y0, 0), mat, -d if inward else d, uv_scale, shadow)
 
 
-## Turn everything collected so far into MeshInstance3D children of `parent`.
-func commit(parent: Node3D) -> int:
+## Tangents are only needed for normal-mapped materials (and generating them is the slow part of a commit)
+static func _needs_tangents(mat: Material) -> bool:
+	if mat is ShaderMaterial:
+		return (mat as ShaderMaterial).get_shader_parameter("has_normal") == true
+	if mat is BaseMaterial3D:
+		return (mat as BaseMaterial3D).normal_enabled
+	return true
+
+
+## Bake what was collected into reusable meshes (no tangents): [{mat, mesh, shadow}], then clear
+func bake() -> Array:
+	var out: Array = []
+	for per in _tools.values():
+		for e in per.values():
+			var m: ArrayMesh = (e["st"] as SurfaceTool).commit()
+			if m != null and m.get_surface_count() > 0:
+				out.append({"mat": e["mat"], "mesh": m, "shadow": e["shadow"]})
+	_tools.clear()
+	_last_mat = null
+	return out
+
+
+## Stamp baked meshes in at xf (native SurfaceTool.append_from); remap swaps placeholder materials
+func append_baked(xf: Transform3D, baked: Array, remap := {}) -> void:
+	for e in baked:
+		var mat: Material = remap.get(e["mat"], e["mat"])
+		_tool(mat, xf.origin, e["shadow"]).append_from(e["mesh"], 0, xf)
+
+
+## Turn everything collected so far into MeshInstance3D children of `parent`. With vis_range each mesh is
+## recentred on its own bounds and only drawn within that distance (house interiors).
+func commit(parent: Node3D, vis_range := 0.0) -> int:
 	var count := 0
-	for key in _tools:
-		var e: Dictionary = _tools[key]
+	var entries: Array = []
+	for per in _tools.values():
+		entries.append_array(per.values())
+	for e in entries:
 		var st: SurfaceTool = e["st"]
-		st.generate_tangents()
+		if _needs_tangents(e["mat"]):
+			st.generate_tangents()
 		var mesh := st.commit()
 		if mesh == null or mesh.get_surface_count() == 0:
 			continue
+		var centre := Vector3.ZERO
+		if vis_range > 0.0:
+			centre = mesh.get_aabb().get_center()
+			var arr := mesh.surface_get_arrays(0)
+			var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+			for i in verts.size():
+				verts[i] -= centre
+			arr[Mesh.ARRAY_VERTEX] = verts
+			mesh = ArrayMesh.new()
+			mesh.add_surface_from_arrays(Mesh.PRIMITIVE_TRIANGLES, arr)
 		mesh.surface_set_material(0, e["mat"])
 		var mi := MeshInstance3D.new()
 		mi.mesh = mesh
+		if vis_range > 0.0:
+			mi.position = centre
+			mi.visibility_range_end = vis_range
+			mi.visibility_range_end_margin = 6.0
 		mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_ON if e["shadow"] else GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 		parent.add_child(mi)
 		count += 1
 	_tools.clear()
+	_last_mat = null
 	return count

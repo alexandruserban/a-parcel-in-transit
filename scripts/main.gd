@@ -35,6 +35,7 @@ var touch
 var birds
 var ducks
 var truck
+var room_lights: Array[OmniLight3D] = []
 
 
 func _ready() -> void:
@@ -94,6 +95,17 @@ func _ready() -> void:
 		add_child(l)
 		lamp_pool.append(l)
 
+	# Room lights: one in each room of the floor you're on, in whichever house you're in (game.js)
+	for i in 5:
+		var rl := OmniLight3D.new()
+		rl.light_color = Color("#ffe2b8")
+		rl.light_energy = 0.0
+		rl.omni_range = 6.5
+		rl.omni_attenuation = 1.2
+		rl.visible = false
+		add_child(rl)
+		room_lights.append(rl)
+
 	hud = Hud.new()
 	hud.game = self
 	hud.mobile = mobile
@@ -109,6 +121,9 @@ func _ready() -> void:
 	# Headless / CI smoke run and screenshot mode
 	if "--smoke" in OS.get_cmdline_user_args():
 		_smoke_test()
+		return
+	if "--stairs" in OS.get_cmdline_user_args():
+		_stairs_test()
 		return
 	if "--drive" in OS.get_cmdline_user_args():
 		_drive_test()
@@ -164,6 +179,8 @@ func _process(delta: float) -> void:
 		sfx.night = night
 	hud.set_clock(("%s %s" if mobile else "[N] %s %s") % [sky.clock_text(), sky.phase_name()])
 	_update_lamp_pool(delta)
+	_update_room_lights()
+	world.house_parts.update(delta)
 	_update_prompt()
 
 
@@ -339,6 +356,22 @@ func toggle_weather() -> void:
 	hud.show_dialogue("Clouding over" if overcast else "Clearing up", "Grey skies rolling in: soft, shadowless light." if overcast else "The clouds are breaking up.")
 
 
+## Room lights follow you indoors (brighter at night); ceiling fixtures glow when the lights are on
+func _update_room_lights() -> void:
+	var p: Vector3 = player.global_position
+	var house = world.house_parts.house_at(p.x, p.z)
+	var day: float = sky.daylight()
+	var target := (0.25 + 0.95 * (1.0 - day)) * 1.6 if house != null else 0.0
+	if house != null:
+		var spots: Array = world.house_parts.room_light_spots(house, p.y > 2.0)
+		for i in room_lights.size():
+			room_lights[i].global_position = spots[i]
+	for l in room_lights:
+		l.light_energy += (target - l.light_energy) * 0.15
+		l.visible = l.light_energy > 0.02
+	world.house_parts.fixture_mat.emission_energy_multiplier = (0.3 + 1.7 * (1.0 - day)) if house != null else (0.15 + (1.2 if is_night else 0.0))
+
+
 ## A handful of real lights follow the street, porch and pier lamps nearest the player at night
 func _update_lamp_pool(delta: float) -> void:
 	_pool_t -= delta
@@ -381,6 +414,45 @@ func _smoke_test() -> void:
 	get_tree().quit(0 if parcels.stored_total() == 1 else 1)
 
 
+## Open a front door, walk into the hall and up the stairs (joystick input in house space)
+func _stairs_test() -> void:
+	get_tree().paused = false
+	hud.show_menu(false)
+	var hp = world.house_parts
+	var rec: Dictionary = hp.interiors[3]
+	var xf: Transform3D = rec.xf
+	var walk := func(target_local: Vector3, secs: float) -> void:
+		var t := 0.0
+		while t < secs:
+			var to: Vector3 = xf * target_local - player.global_position
+			to.y = 0
+			if to.length() < 0.25:
+				break
+			var d := to.normalized().rotated(Vector3.UP, -player.yaw)
+			player.move_input = Vector2(d.x, d.z)
+			await get_tree().physics_frame
+			t += get_physics_process_delta_time()
+		player.move_input = Vector2.ZERO
+	player.global_position = xf * Vector3(0, 0.1, 9.5)
+	await get_tree().physics_frame
+	var door: Dictionary = {}
+	for it in world.interactables:
+		if it.type == "door" and it.pos.distance_to(xf * Vector3(0, 1.4, 7)) < 0.1:
+			door = it
+	door.call.call()
+	await get_tree().create_timer(1.0).timeout
+	await walk.call(Vector3(0.2, 0, 5.0), 4.0)
+	await walk.call(Vector3(0.2, 0, -0.25), 4.0)
+	print("STAIRS: in the hall at y %.2f, in house: %s" % [player.global_position.y, hp.house_at(player.global_position.x, player.global_position.z) != null])
+	await walk.call(Vector3(1.0, 0, -0.25), 2.0)
+	await walk.call(Vector3(7.0, 0, -0.25), 6.0)
+	print("STAIRS: top of the flight at y %.2f" % player.global_position.y)
+	await walk.call(Vector3(6.6, 0, 1.3), 3.0)
+	await get_tree().create_timer(0.5).timeout
+	print("STAIRS: upstairs landing at y %.2f (upper floor is %.2f)" % [player.global_position.y, hp.UP])
+	get_tree().quit()
+
+
 ## Get in the truck, hold W for 3 s (then W+A), screenshot the chase camera, stop and get out
 func _drive_test() -> void:
 	get_tree().paused = false
@@ -420,6 +492,7 @@ func _drive_test() -> void:
 	get_tree().quit()
 
 
+const UP_LOOK := 4.4
 var _shots := []
 func _screenshot_mode() -> void:
 	get_tree().paused = false
@@ -438,6 +511,12 @@ func _screenshot_mode() -> void:
 		[Vector3(-45, 0.1, 130), 0.0, -0.3, 10.0, "ducks", 40.0],
 		[Vector3(-15, 0.1, 9), 0.99, -0.12, 15.0, "truck", 60.0],
 		[Vector3(-90, 0.1, -120), 1.30, 0.22, 16.0, "castle_town", 50.0],
+		[Vector3(0, 0, 0), "house", Vector3(-4.0, 1.6, 6.0), 15.0, "living_room", 75.0],
+		[Vector3(0, 0, 0), "house", Vector3(-3.0, 1.6, -1.6), 15.0, "kitchen", 75.0],
+		[Vector3(0, 0, 0), "house", Vector3(2.0, 5.2, 0.9), 15.0, "upstairs", 75.0],
+		[Vector3(0, 0, 0), "house", Vector3(-1.0, 1.6, 12.0), 20.5, "house_front", 70.0],
+		[Vector3(0, 0, 0), "house", Vector3(-4.0, 1.7, 22.0), 11.0, "house_timber", 70.0, 0],
+		[Vector3(0, 0, 0), "house", Vector3(-20.0, 1.7, 12.0), 11.0, "garage_open", 60.0, 1],
 		[Vector3(-200, 30, -110), "cam", Vector3(-290, 95, -175), 16.0, "castle_near", 55.0],
 		[Vector3(-262, 92, -165), "cam", Vector3(-298, 100, -178), 21.5, "castle_court", 70.0],
 		[Vector3(-31, 0.1, -5), -2.3, -0.12, 15.0, "truck_rear", 60.0],
@@ -463,6 +542,15 @@ func _screenshot_mode() -> void:
 				var d: Vector3 = sky.moon_dir
 				player.yaw = atan2(-d.x, -d.z)
 				player.pitch = asin(d.y)
+			elif s[1] is String and s[1] == "house":   # inside / in front of the first house: s[2] is the eye in house space
+				var rec: Dictionary = world.house_parts.interiors[s[6] if s.size() > 6 else 3]
+				var hx: Transform3D = rec.xf
+				var eye: Vector3 = hx * s[2]
+				var look: Vector3 = hx * (Vector3(-6.0, 1.0, 2.0) if s[4] == "living_room" else (Vector3(-5.0, 0.9, -6.5) if s[4] == "kitchen" else (Vector3(-5.0, UP_LOOK, 4.0) if s[4] == "upstairs" else (Vector3(-11.5, 1.5, 0.0) if s[4] == "garage_open" else Vector3(0, 4.0, 0)))))
+				player.set_physics_process(false)
+				player.set_process(false)
+				player.global_position = Vector3(eye.x, eye.y - 1.6, eye.z)
+				player.camera.global_transform = Transform3D(Basis(), eye).looking_at(look)
 			elif s[1] is String and s[1] == "cam":   # free camera: from s[0] towards s[2]
 				player.set_physics_process(false)
 				player.set_process(false)

@@ -123,7 +123,7 @@ func _free_spot(x: float, z: float, r: float) -> bool:
 		return false
 	if world.any_rect(world.footprints, x, z, r) or world.in_lake(x, z, 3.0):
 		return false
-	for s in world.solids:
+	for s in world.solids_near(x, z, r):
 		if s.top > 0.5 and s.bottom < 1.0 and world.in_rect(s.rect, x, z, r):
 			return false
 	return true
