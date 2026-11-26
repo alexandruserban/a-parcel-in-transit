@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://b0jhmgxpu4cni"
 path.s3tc="res://.godot/imported/timber_6b4c33_col.png-e21080384cbf62436ab32677a0109293.s3tc.ctex"
+path.etc2="res://.godot/imported/timber_6b4c33_col.png-e21080384cbf62436ab32677a0109293.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/timber_6b4c33_col.png"
-dest_files=["res://.godot/imported/timber_6b4c33_col.png-e21080384cbf62436ab32677a0109293.s3tc.ctex"]
+dest_files=["res://.godot/imported/timber_6b4c33_col.png-e21080384cbf62436ab32677a0109293.s3tc.ctex", "res://.godot/imported/timber_6b4c33_col.png-e21080384cbf62436ab32677a0109293.etc2.ctex"]
 
 [params]
 

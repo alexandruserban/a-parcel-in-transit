@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://cbdv4bmkqpvyn"
 path.s3tc="res://.godot/imported/copper_col.png-063c3733ca52a1ce2d49790c634c476a.s3tc.ctex"
+path.etc2="res://.godot/imported/copper_col.png-063c3733ca52a1ce2d49790c634c476a.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/copper_col.png"
-dest_files=["res://.godot/imported/copper_col.png-063c3733ca52a1ce2d49790c634c476a.s3tc.ctex"]
+dest_files=["res://.godot/imported/copper_col.png-063c3733ca52a1ce2d49790c634c476a.s3tc.ctex", "res://.godot/imported/copper_col.png-063c3733ca52a1ce2d49790c634c476a.etc2.ctex"]
 
 [params]
 

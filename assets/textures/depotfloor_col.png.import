@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://bkmoard4olwjr"
 path.s3tc="res://.godot/imported/depotfloor_col.png-1c3afeb42518211fc53b161222833a65.s3tc.ctex"
+path.etc2="res://.godot/imported/depotfloor_col.png-1c3afeb42518211fc53b161222833a65.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/depotfloor_col.png"
-dest_files=["res://.godot/imported/depotfloor_col.png-1c3afeb42518211fc53b161222833a65.s3tc.ctex"]
+dest_files=["res://.godot/imported/depotfloor_col.png-1c3afeb42518211fc53b161222833a65.s3tc.ctex", "res://.godot/imported/depotfloor_col.png-1c3afeb42518211fc53b161222833a65.etc2.ctex"]
 
 [params]
 

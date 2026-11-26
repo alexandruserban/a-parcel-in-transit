@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://d3nl04pmq1b4p"
 path.s3tc="res://.godot/imported/stainedglass_1_col.png-ce7303504b3463ee49523200203e90f2.s3tc.ctex"
+path.etc2="res://.godot/imported/stainedglass_1_col.png-ce7303504b3463ee49523200203e90f2.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/stainedglass_1_col.png"
-dest_files=["res://.godot/imported/stainedglass_1_col.png-ce7303504b3463ee49523200203e90f2.s3tc.ctex"]
+dest_files=["res://.godot/imported/stainedglass_1_col.png-ce7303504b3463ee49523200203e90f2.s3tc.ctex", "res://.godot/imported/stainedglass_1_col.png-ce7303504b3463ee49523200203e90f2.etc2.ctex"]
 
 [params]
 

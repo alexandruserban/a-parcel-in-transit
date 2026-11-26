@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://b8pjla68mlbks"
 path.s3tc="res://.godot/imported/slate_rgh.png-593784bd4d00cac90ad108bb078c3cbd.s3tc.ctex"
+path.etc2="res://.godot/imported/slate_rgh.png-593784bd4d00cac90ad108bb078c3cbd.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/slate_rgh.png"
-dest_files=["res://.godot/imported/slate_rgh.png-593784bd4d00cac90ad108bb078c3cbd.s3tc.ctex"]
+dest_files=["res://.godot/imported/slate_rgh.png-593784bd4d00cac90ad108bb078c3cbd.s3tc.ctex", "res://.godot/imported/slate_rgh.png-593784bd4d00cac90ad108bb078c3cbd.etc2.ctex"]
 
 [params]
 

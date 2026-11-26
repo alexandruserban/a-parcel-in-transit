@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://sso2qsav0x6t"
 path.s3tc="res://.godot/imported/corrugated_b9c0c4_col.png-cb8b4bf608d18b32bdf780fbee8a28f5.s3tc.ctex"
+path.etc2="res://.godot/imported/corrugated_b9c0c4_col.png-cb8b4bf608d18b32bdf780fbee8a28f5.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/corrugated_b9c0c4_col.png"
-dest_files=["res://.godot/imported/corrugated_b9c0c4_col.png-cb8b4bf608d18b32bdf780fbee8a28f5.s3tc.ctex"]
+dest_files=["res://.godot/imported/corrugated_b9c0c4_col.png-cb8b4bf608d18b32bdf780fbee8a28f5.s3tc.ctex", "res://.godot/imported/corrugated_b9c0c4_col.png-cb8b4bf608d18b32bdf780fbee8a28f5.etc2.ctex"]
 
 [params]
 

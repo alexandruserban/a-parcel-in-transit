@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://xl8isadi4sm7"
 path.s3tc="res://.godot/imported/needlecard_col.png-b4f77f859a7e4be29f6ea3df5677328e.s3tc.ctex"
+path.etc2="res://.godot/imported/needlecard_col.png-b4f77f859a7e4be29f6ea3df5677328e.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/needlecard_col.png"
-dest_files=["res://.godot/imported/needlecard_col.png-b4f77f859a7e4be29f6ea3df5677328e.s3tc.ctex"]
+dest_files=["res://.godot/imported/needlecard_col.png-b4f77f859a7e4be29f6ea3df5677328e.s3tc.ctex", "res://.godot/imported/needlecard_col.png-b4f77f859a7e4be29f6ea3df5677328e.etc2.ctex"]
 
 [params]
 

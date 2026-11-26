@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://bfxqa4pqi02wd"
 path.s3tc="res://.godot/imported/leafcard_leaf_col.png-78055c6cbaa8231047bcb1a6f8a01ce4.s3tc.ctex"
+path.etc2="res://.godot/imported/leafcard_leaf_col.png-78055c6cbaa8231047bcb1a6f8a01ce4.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/leafcard_leaf_col.png"
-dest_files=["res://.godot/imported/leafcard_leaf_col.png-78055c6cbaa8231047bcb1a6f8a01ce4.s3tc.ctex"]
+dest_files=["res://.godot/imported/leafcard_leaf_col.png-78055c6cbaa8231047bcb1a6f8a01ce4.s3tc.ctex", "res://.godot/imported/leafcard_leaf_col.png-78055c6cbaa8231047bcb1a6f8a01ce4.etc2.ctex"]
 
 [params]
 

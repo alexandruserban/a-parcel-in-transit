@@ -11,6 +11,17 @@ A Godot 4.7 port of the Three.js / WebView game in `../tidyup`. It is a first-pe
 - **Screenshots** of five views (street, church, depot, sunset, night):
   `Godot_v4.7.2-stable_win64_console.exe --path . -- --shot <folder>`
 
+## Android build (phones)
+
+The Android export preset builds an arm64 APK, landscape and full screen. Building it needs the Godot 4.7.2 export templates, the Android SDK and a JDK (set under Editor Settings > Export > Android).
+
+```
+Godot_v4.7.2-stable_win64_console.exe --headless --path . --export-debug "Android" export/ParcelRun.apk
+adb install -r export/ParcelRun.apk
+```
+
+On a phone the game shows touch controls: a joystick under your left thumb (push past the rim to sprint), drag on the right side to look, and Use / Jump / Crouch / Light / Drop buttons. II or the back button pauses. Phones get lighter graphics, like the web version's Low preset. Run the desktop build with `-- --mobile` to try the phone layout.
+
 ## Controls
 
 | Action | Key |
@@ -69,4 +80,4 @@ Still to port:
 - [ ] Ducks, pier and benches at the ponds; birds, chimney smoke, playground, park flower beds and fountain plaza
 - [ ] Billboard clouds (the Godot sky draws its own clouds for now)
 - [ ] Basketball hoops, mailboxes, garage workshops
-- [ ] Graphics settings menu, touch controls, Android export
+- [ ] Graphics settings menu (phones use fixed Low-style settings for now)

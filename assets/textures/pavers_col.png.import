@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://csn4gl6m8v2nq"
 path.s3tc="res://.godot/imported/pavers_col.png-586ab6405e9d36623b74cb9cded5f3a2.s3tc.ctex"
+path.etc2="res://.godot/imported/pavers_col.png-586ab6405e9d36623b74cb9cded5f3a2.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/pavers_col.png"
-dest_files=["res://.godot/imported/pavers_col.png-586ab6405e9d36623b74cb9cded5f3a2.s3tc.ctex"]
+dest_files=["res://.godot/imported/pavers_col.png-586ab6405e9d36623b74cb9cded5f3a2.s3tc.ctex", "res://.godot/imported/pavers_col.png-586ab6405e9d36623b74cb9cded5f3a2.etc2.ctex"]
 
 [params]
 

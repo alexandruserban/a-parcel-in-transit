@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://dfcm2k7ndo6jv"
 path.s3tc="res://.godot/imported/foliage_leaf_nrm.png-a8400207fe7382333cb45ad4d6c2f69c.s3tc.ctex"
+path.etc2="res://.godot/imported/foliage_leaf_nrm.png-a8400207fe7382333cb45ad4d6c2f69c.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/foliage_leaf_nrm.png"
-dest_files=["res://.godot/imported/foliage_leaf_nrm.png-a8400207fe7382333cb45ad4d6c2f69c.s3tc.ctex"]
+dest_files=["res://.godot/imported/foliage_leaf_nrm.png-a8400207fe7382333cb45ad4d6c2f69c.s3tc.ctex", "res://.godot/imported/foliage_leaf_nrm.png-a8400207fe7382333cb45ad4d6c2f69c.etc2.ctex"]
 
 [params]
 

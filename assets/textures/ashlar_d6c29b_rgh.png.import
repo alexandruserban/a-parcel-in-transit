@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://dp08actj5tka"
 path.s3tc="res://.godot/imported/ashlar_d6c29b_rgh.png-00825e6cd7f7f412f9be50edc088cd23.s3tc.ctex"
+path.etc2="res://.godot/imported/ashlar_d6c29b_rgh.png-00825e6cd7f7f412f9be50edc088cd23.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/ashlar_d6c29b_rgh.png"
-dest_files=["res://.godot/imported/ashlar_d6c29b_rgh.png-00825e6cd7f7f412f9be50edc088cd23.s3tc.ctex"]
+dest_files=["res://.godot/imported/ashlar_d6c29b_rgh.png-00825e6cd7f7f412f9be50edc088cd23.s3tc.ctex", "res://.godot/imported/ashlar_d6c29b_rgh.png-00825e6cd7f7f412f9be50edc088cd23.etc2.ctex"]
 
 [params]
 

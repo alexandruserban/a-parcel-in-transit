@@ -4,15 +4,16 @@ importer="texture"
 type="CompressedTexture2D"
 uid="uid://cu3e7q1q7yrhp"
 path.s3tc="res://.godot/imported/leadedglass_col.png-5efdb8be4f314ca01e4ecc8dfae90769.s3tc.ctex"
+path.etc2="res://.godot/imported/leadedglass_col.png-5efdb8be4f314ca01e4ecc8dfae90769.etc2.ctex"
 metadata={
-"imported_formats": ["s3tc_bptc"],
+"imported_formats": ["s3tc_bptc", "etc2_astc"],
 "vram_texture": true
 }
 
 [deps]
 
 source_file="res://assets/textures/leadedglass_col.png"
-dest_files=["res://.godot/imported/leadedglass_col.png-5efdb8be4f314ca01e4ecc8dfae90769.s3tc.ctex"]
+dest_files=["res://.godot/imported/leadedglass_col.png-5efdb8be4f314ca01e4ecc8dfae90769.s3tc.ctex", "res://.godot/imported/leadedglass_col.png-5efdb8be4f314ca01e4ecc8dfae90769.etc2.ctex"]
 
 [params]
 
