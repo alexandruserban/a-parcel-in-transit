@@ -6,6 +6,8 @@ extends Node3D
 ## First iteration: the layout and dimensions match the web version; many details are simpler.
 
 const Batch := preload("res://scripts/batch.gd")
+const Trees := preload("res://scripts/trees.gd")
+const WATER_Y := -0.32        # pond water level, below the lawn (world.js WATER_Y)
 
 const FENCE := 185.0          # inner face of the city wall
 const GROUND := 300.0
@@ -41,16 +43,14 @@ var park_blocked: Array[Rect2] = []
 var gate_spots: Array[Vector2] = []
 var tree_spots: Array[Vector2] = []
 
+var trees: Trees
+var water_mats: Array[ShaderMaterial] = []
 var night_glows: Array = []           # [{mat, energy}] emissive materials that light up at night
 var mats := {}
 var b: Batch
 var body: StaticBody3D
 var rng := RandomNumberGenerator.new()
 
-# Tree instances, turned into MultiMeshes at the end: [Transform3D, Color]
-var _trunks: Array = []
-var _crowns: Array = []
-var _cones: Array = []
 
 var house_colors: Array = []
 var dialogue := {}
@@ -66,6 +66,7 @@ func build() -> void:
 	body.add_child(floor_shape)
 	b = Batch.new()
 	_make_materials()
+	trees = Trees.new(self)
 	_residents()
 	_plan()
 	_terrain_and_roads()
@@ -77,11 +78,12 @@ func build() -> void:
 	_city_wall()
 	_street_lights()
 	_avenue_trees()
-	_scatter_trees()
+	_vegetation()
 	_mountains()
-	_commit_trees()
+	trees.build_forest(self)
+	var cards: int = trees.commit(self)
 	var n := b.commit(self)
-	print("World built: %d batched meshes, %d solids, %d interactables" % [n, solids.size(), interactables.size()])
+	print("World built: %d batched meshes, %d leaf cards, %d trees, %d solids, %d interactables" % [n, cards, trees.spots.size(), solids.size(), interactables.size()])
 
 
 # ----------------------------------------------------------------------------------------------
@@ -478,7 +480,7 @@ static func _lot_less(a: Dictionary, c: Dictionary) -> bool:
 # ----------------------------------------------------------------------------------------------
 func _terrain_and_roads() -> void:
 	var G := GROUND
-	flat(rect(-G, -G, G, G), 0.0, mats.grass)
+	_ground_with_ponds(G)
 
 	for s in NS_STREETS:
 		flat(rect(s.x - NS_HALF, -ns_len, s.x + NS_HALF, ns_len), 0.02, mats.cobble)
@@ -533,6 +535,68 @@ func _terrain_and_roads() -> void:
 			var z0: float = sz * (165 - EW)
 			var z1: float = sz * (165 + EW + W)
 			_sidewalk(x, (z0 + z1) / 2, W, absf(z1 - z0), 0.248, "", 0)
+
+
+## The lawn, with a hole for each pond (the water sits 0.32 m down inside a masonry wall). The valley floor is a
+## grid of 20 m cells; cells round a pond are left out and filled with a ring from the pond's edge to the cells.
+func _ground_with_ponds(G: float) -> void:
+	var cell := 20.0
+	var holes: Array[Rect2] = []
+	for l in lakes:
+		var a: float = l.rw + 3.0
+		var c: float = l.rd + 3.0
+		var r := rect(floorf((l.cx - a) / cell) * cell, floorf((l.cz - c) / cell) * cell, ceilf((l.cx + a) / cell) * cell, ceilf((l.cz + c) / cell) * cell)
+		holes.append(r)
+		l["hole"] = r
+	var x := -G
+	while x < G:
+		var z := -G
+		while z < G:
+			var r := Rect2(x, z, cell, cell)
+			var skip := false
+			for h in holes:
+				if h.encloses(r):
+					skip = true
+			if not skip:
+				flat(r, 0.0, mats.grass)
+			z += cell
+		x += cell
+	# Fill from the pond's edge (just inside the coping) out to the rectangle of left-out cells
+	for l in lakes:
+		var hr: Rect2 = l.hole
+		var cx: float = l.cx
+		var cz: float = l.cz
+		var a: float = l.rw + 0.4
+		var c: float = l.rd + 0.4
+		var angles: Array[float] = []
+		for i in 96:
+			angles.append(TAU * i / 96.0)
+		for corner in [hr.position, Vector2(hr.end.x, hr.position.y), hr.end, Vector2(hr.position.x, hr.end.y)]:
+			angles.append(fposmod(atan2(corner.y - cz, corner.x - cx), TAU))
+		angles.sort()
+		for i in angles.size():
+			var t0: float = angles[i]
+			var t1: float = angles[(i + 1) % angles.size()]
+			if i == angles.size() - 1:
+				t1 += TAU
+			if t1 - t0 < 1e-5:
+				continue
+			var p0 := Vector3(cx + cos(t0) * a, 0, cz + sin(t0) * c)
+			var p1 := Vector3(cx + cos(t1) * a, 0, cz + sin(t1) * c)
+			var q0 := _ray_rect(cx, cz, t0, hr)
+			var q1 := _ray_rect(cx, cz, t1, hr)
+			b.quad(Transform3D.IDENTITY, p0, q0, q1, p1, mats.grass, Vector3.UP, 1.0, false)
+
+
+static func _ray_rect(cx: float, cz: float, t: float, r: Rect2) -> Vector3:
+	var dx := cos(t)
+	var dz := sin(t)
+	var k := INF
+	if dx > 1e-6: k = minf(k, (r.end.x - cx) / dx)
+	if dx < -1e-6: k = minf(k, (r.position.x - cx) / dx)
+	if dz > 1e-6: k = minf(k, (r.end.y - cz) / dz)
+	if dz < -1e-6: k = minf(k, (r.position.y - cz) / dz)
+	return Vector3(cx + dx * k, 0, cz + dz * k)
 
 
 ## Pavement of sandstone slabs with a granite kerb along the road edge (axis "x": kerb runs along z at x = k)
@@ -1034,7 +1098,7 @@ func _squares() -> void:
 				b.cylinder(I, Vector3(cx, 2.4, cz), 0.25, 0.0, 0.8, 8, mats.brass)
 				solid_cyl(cx, cz, 2.4, 0.6)
 			"linden":
-				_tree(cx, cz, "linden", 1.3)
+				_tree(cx, cz, "linden", 1.45)
 				b.cylinder(I, Vector3(cx, 0, cz), 2.0, 2.0, 0.45, 16, color_mat("#6b5040"), true)
 			"maypole":
 				b.cylinder(I, Vector3(cx, 0, cz), 0.18, 0.12, 18, 8, mats.white)
@@ -1053,6 +1117,9 @@ func _squares() -> void:
 				b.cylinder(I, Vector3(cx, 0, cz), 0.75, 0.75, 3.6, 16, color_mat("#3d5a4a"))
 				b.cylinder(I, Vector3(cx, 3.6, cz), 0.85, 0.0, 0.7, 16, color_mat("#3d5a4a"))
 				solid_cyl(cx, cz, 0.75, 3.6)
+		if d.kind != "linden":
+			for sx in [-1, 1]:
+				_tree(d.x + sx * 4.6, z0 + d.side * 10.6, "linden", 1.0)
 		var msg := "%s: one of the six little squares of the old town." % nm
 		add_interactable(Vector3(cx, 1.2, cz), "[E] %s" % nm, "square",
 			func() -> Dictionary: return {"title": nm, "message": msg, "sound": "click"})
@@ -1067,27 +1134,138 @@ func _park_and_lakes() -> void:
 	flat(rect(park.position.x, 79.5, park.end.x, 82.5), 0.032, mats.gravel, 1.0)
 	park_blocked.append(rect(-47.5, 66, -42.5, 97))
 	park_blocked.append(rect(park.position.x, 78.5, park.end.x, 83.5))
+	var noise := tex("water_height")
+	var masonry := tex("masonry_col")
+	var dry := _std(Color("#b9b2a6"), 0.9)
+	dry.albedo_texture = masonry
+	dry.uv1_scale = Vector3(0.5, 0.5, 1)
+	var wet := _std(Color("#5e5a50"), 0.45)
+	wet.albedo_texture = masonry
+	wet.uv1_scale = Vector3(0.5, 0.5, 1)
+	var coping := tmat("concrete", Vector2(1, 1), {"tint": Color("#d9d1c1"), "rough": 0.85, "depth": 0.5})
+	var edge := tmat("concrete", Vector2(1, 1), {"tint": Color("#c8c0b0"), "rough": 0.9})
+	var path := tmat("pavers", Vector2(2, 2), {"tint": Color("#d6cfc4"), "rough": 0.9, "depth": 0.5})
+	var brick := tmat("brick_7a4a36", Vector2(0.5, 0.5), {"tint": Color("#bbbbbb"), "rough": 0.9})
 	for l in lakes:
 		var cx: float = l.cx
 		var cz: float = l.cz
 		var rw: float = l.rw
 		var rd: float = l.rd
-		# gravel walk round the pond, sandstone coping, water
-		b.ellipse_ring(I, cx, cz, rw + 1.2, rd + 1.2, rw + 3.6, rd + 3.6, 0.03, mats.gravel, 72)
-		b.ellipse_ring(I, cx, cz, rw, rd, rw + 1.2, rd + 1.2, 0.32, mats.palestone, 72)
-		b.ellipse_wall(I, cx, cz, rw + 1.2, rd + 1.2, 0.0, 0.32, mats.palestone, false, 72)
-		b.ellipse_wall(I, cx, cz, rw, rd, -0.2, 0.32, mats.palestone, true, 72)
-		b.ellipse_ring(I, cx, cz, 0.0, 0.0, rw, rd, 0.1, mats.water, 72)
-		paved_rects.append(rect(cx - rw - 1.2, cz - rd - 1.2, cx + rw + 1.2, cz + rd + 1.2))
-		for k in 14:
-			var a := rng.randf() * TAU
-			var rr := rng.randf_range(0.55, 0.92)
-			var px := cx + cos(a) * rw * rr
-			var pz := cz + sin(a) * rd * rr
-			b.cylinder(I, Vector3(px, 0.11, pz), 0.4, 0.4, 0.01, 10, mats.lily, true, 1.0, false)
+		var pier_dir := 1.0 if l.name == "Park Pond" else -1.0
+		# Water: the ellipse just inside the masonry wall
+		var wm := ShaderMaterial.new()
+		wm.shader = load("res://shaders/pond_water.gdshader")
+		wm.set_shader_parameter("noise_tex", noise)
+		wm.set_shader_parameter("center", Vector2(cx, cz))
+		wm.set_shader_parameter("axes", Vector2(rw, rd))
+		water_mats.append(wm)
+		b.ellipse_ring(I, cx, cz, 0.0, 0.0, rw + 0.05, rd + 0.05, WATER_Y, wm, 96)
+		# Masonry wall from below the waterline up to the coping, darker where wet
+		_band(cx, cz, rw, rd, Vector2(0, WATER_Y - 0.2), Vector2(0, WATER_Y + 0.09), wet, true)
+		_band(cx, cz, rw, rd, Vector2(0, WATER_Y + 0.09), Vector2(0, -0.04), dry, true)
+		# Coping slabs overhanging the wall, their edges, the paved walk and its brick edging
+		var lip := -0.18
+		var back := 0.62
+		var top := 0.14
+		b.ellipse_ring(I, cx, cz, rw + lip, rd + lip, rw + back, rd + back, top, coping, 96, 1.0, true)
+		_band(cx, cz, rw, rd, Vector2(lip, -0.04), Vector2(lip, top), edge, true)
+		b.ellipse_ring(I, cx, cz, rw + lip, rd + lip, rw, rd, -0.04, edge, 96)   # underside of the overhang (seen from the water)
+		_band(cx, cz, rw, rd, Vector2(back, 0.0), Vector2(back, top), edge, false)
+		b.ellipse_ring(I, cx, cz, rw + back, rd + back, rw + 2.4, rd + 2.4, 0.025, path, 96)
+		b.ellipse_ring(I, cx, cz, rw + 2.4, rd + 2.4, rw + 2.52, rd + 2.52, 0.07, brick, 96)
+		_band(cx, cz, rw, rd, Vector2(2.52, 0.0), Vector2(2.52, 0.07), brick, false)
+		paved_rects.append(rect(cx - rw - 2.4, cz - rd - 2.4, cx + rw + 2.4, cz + rd + 2.4))
+		_lily_pads(cx, cz, rw, rd, pier_dir)
+		_cattails(cx, cz, rw, rd, pier_dir)
+		trees.build_willow(cx - pier_dir * (rw + 4.2), cz + rd * 0.35)
 		var nm: String = l.name
 		add_interactable(Vector3(cx, 0.8, cz - rd - 0.8), "[E] %s" % nm, "lake",
-			func() -> Dictionary: return {"title": nm, "message": "Ducks, a pier and reeds come back to the pond in a later version of the Godot port.", "sound": "click"})
+			func() -> Dictionary: return {"title": nm, "message": "The ducks and the pier come back to the pond in a later version of the Godot port.", "sound": "click"})
+
+
+## Vertical band round a pond from (radial offset, y) a to b; faces into the pond, or out of it
+func _band(cx: float, cz: float, rw: float, rd: float, a: Vector2, c: Vector2, mat: Material, inward: bool) -> void:
+	for i in 96:
+		var t0 := TAU * i / 96.0
+		var t1 := TAU * (i + 1) / 96.0
+		var p := func(t: float, o: Vector2) -> Vector3: return Vector3(cx + cos(t) * (rw + o.x), o.y, cz + sin(t) * (rd + o.x))
+		var d := Vector3(cos((t0 + t1) / 2), 0, sin((t0 + t1) / 2))
+		b.quad(Transform3D.IDENTITY, p.call(t0, a), p.call(t1, a), p.call(t1, c), p.call(t0, c), mat, -d if inward else d, 1.0, true)
+
+
+func _lily_pads(cx: float, cz: float, rw: float, rd: float, pier_dir: float) -> void:
+	var pad := CylinderMesh.new()
+	pad.top_radius = 0.32
+	pad.bottom_radius = 0.32
+	pad.height = 0.01
+	pad.radial_segments = 18
+	pad.rings = 1
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = true
+	mm.mesh = pad
+	mm.instance_count = 46
+	var colonies := []
+	for k in 3:
+		colonies.append((PI if pier_dir > 0 else 0.0) + (k - 1) * 0.9 + (rng.randf() - 0.5) * 0.3)
+	var I := Transform3D.IDENTITY
+	for i in 46:
+		var t: float = colonies[i % 3] + (rng.randf() - 0.5) * 0.45
+		var r := 0.68 + rng.randf() * 0.24
+		var p := Vector3(cx + cos(t) * rw * r, WATER_Y + 0.012 + rng.randf() * 0.004, cz + sin(t) * rd * r)
+		var sc := 0.6 + rng.randf() * 0.8
+		mm.set_instance_transform(i, Transform3D(Basis(Vector3.UP, rng.randf() * TAU).scaled(Vector3(sc, 1, sc)), p))
+		mm.set_instance_color(i, Color.from_hsv(0.24 + rng.randf() * 0.05, 0.6, 0.3 + rng.randf() * 0.12))
+		if rng.randf() < 0.15:
+			b.cylinder(I, p + Vector3(0.08, 0.1, 0), 0.0, 0.09, 0.1, 7, color_mat("#f6e9ef"), false)
+			b.cylinder(I, p + Vector3(0.08, 0.04, 0), 0.03, 0.03, 0.06, 6, color_mat("#f2c94c"))
+	var mi := MultiMeshInstance3D.new()
+	mi.multimesh = mm
+	var m := _std(Color.WHITE, 0.55)
+	m.vertex_color_use_as_albedo = true
+	mi.material_override = m
+	add_child(mi)
+
+
+## Clumps of reeds standing in the shallows along the wall, the pier's stretch of shore kept clear
+func _cattails(cx: float, cz: float, rw: float, rd: float, pier_dir: float) -> void:
+	var stalk := color_mat("#5b7a3a")
+	var head := _std(Color("#5a3a1e"), 0.95)
+	var blade_m := _std(Color("#6c8a45"), 0.8)
+	blade_m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	for c in 6:
+		var t := (c / 6.0) * TAU + rng.randf() * 0.5
+		if absf(atan2(sin(t), cos(t) * pier_dir)) < 0.35:
+			t += 0.8
+		for i in 6 + rng.randi_range(0, 5):
+			var tt := t + (rng.randf() - 0.5) * 0.09
+			var r := 1.0 - (0.25 + rng.randf() * 0.9) / rw
+			var x := cx + cos(tt) * rw * r
+			var z := cz + sin(tt) * rd * r
+			var h := 1.2 + rng.randf() * 0.6
+			var lean := Basis.from_euler(Vector3((rng.randf() - 0.5) * 0.12, 0, (rng.randf() - 0.5) * 0.12))
+			var xf := Transform3D(lean, Vector3(x, WATER_Y, z))
+			b.cylinder(xf, Vector3.ZERO, 0.018, 0.012, h, 5, stalk, false)
+			if rng.randf() < 0.7:
+				b.cylinder(xf, Vector3(0, h - 0.31, 0), 0.035, 0.035, 0.22, 8, head)
+			for k in 2:
+				var bxf := Transform3D(Basis.from_euler(Vector3((rng.randf() - 0.5) * 0.5, rng.randf() * PI, (rng.randf() - 0.5) * 0.5)), Vector3(x, WATER_Y, z))
+				var bh := h * (0.7 + rng.randf() * 0.3)
+				b.tri(bxf, Vector3(-0.025, 0, 0), Vector3(0.025, 0, 0), Vector3(0, bh, 0), blade_m, Vector3.BACK, 1.0, false)
+
+
+## Live sky for the pond water (linkSky / updateLakeWater in world.js)
+func set_water_sky(p: Dictionary, sun_dir: Vector3, moon_dir: Vector3, moon_vis: float, day: float, sun_vis: float) -> void:
+	for m in water_mats:
+		m.set_shader_parameter("zenith", p.zenith)
+		m.set_shader_parameter("horizon", p.horizon)
+		m.set_shader_parameter("sun_color", p.sun)
+		m.set_shader_parameter("sun_glow", p.glow)
+		m.set_shader_parameter("sun_dir", sun_dir)
+		m.set_shader_parameter("moon_dir", moon_dir)
+		m.set_shader_parameter("moon_vis", moon_vis)
+		m.set_shader_parameter("day", day)
+		m.set_shader_parameter("sun_vis", sun_vis)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1231,36 +1409,10 @@ func _lantern(x: float, z: float) -> void:
 # ----------------------------------------------------------------------------------------------
 # Trees (collected as instances, drawn as MultiMeshes)
 # ----------------------------------------------------------------------------------------------
-func _tree(x: float, z: float, kind: String, s := 1.0, y0 := 0.0, collide := true) -> void:
+## Plant one tree (types as in world.js: deciduous, linden, flowering, pine)
+func _tree(x: float, z: float, kind: String, s := 1.0) -> void:
 	tree_spots.append(Vector2(x, z))
-	var tint := 0.85 + rng.randf() * 0.3
-	if kind == "pine":
-		var th := 2.2 * s
-		_trunks.append([Transform3D(Basis().scaled(Vector3(0.7 * s, th, 0.7 * s)), Vector3(x, y0 + th / 2, z)), Color(1, 1, 1)])
-		var col := Color("#2f4f2a") * tint
-		var tiers := [[2.6, 4.2, 1.6], [2.0, 3.6, 3.9], [1.35, 3.0, 6.0], [0.7, 2.0, 7.9]]
-		for t in tiers:
-			var r: float = t[0] * s
-			var h: float = t[1] * s
-			_cones.append([Transform3D(Basis().scaled(Vector3(r, h, r)), Vector3(x, y0 + t[2] * s + h / 2, z)), col])
-		if collide:
-			solid_cyl(x, z, 0.3 * s, 3.0)
-		return
-	var trunk_h := 4.4 * s
-	_trunks.append([Transform3D(Basis().scaled(Vector3(s, trunk_h, s)), Vector3(x, y0 + trunk_h / 2, z)), Color(1, 1, 1)])
-	var base := Color("#4f7a2e") if kind == "linden" else Color("#e6a3c0")
-	if kind == "oak":
-		base = Color("#44692a")
-	var cy := y0 + 6.4 * s
-	_crowns.append([Transform3D(Basis().scaled(Vector3(3.3, 2.9, 3.3) * s), Vector3(x, cy, z)), base * tint])
-	for k in 5:
-		var a := rng.randf() * TAU
-		var d := rng.randf_range(1.4, 2.4) * s
-		var sc := rng.randf_range(1.6, 2.2) * s
-		var lobe := Vector3(x + cos(a) * d, cy + rng.randf_range(-1.2, 1.6) * s, z + sin(a) * d)
-		_crowns.append([Transform3D(Basis().scaled(Vector3(sc, sc * 0.85, sc)), lobe), base * (tint * rng.randf_range(0.85, 1.1))])
-	if collide:
-		solid_cyl(x, z, 0.32 * s, 4.0)
+	trees.build_tree(x, z, kind, s)
 
 
 func _near_tree(x: float, z: float, d: float) -> bool:
@@ -1310,80 +1462,51 @@ func _plant(x: float, z: float, k: int) -> void:
 	_tree(x, z, "flowering" if blossom else "linden", 1.25 if blossom else 1.15 + hash01(k, 3) * 0.3)
 
 
-## Park trees, back-garden trees, and the forest on the foothills outside the wall
-func _scatter_trees() -> void:
-	var n := 0
+## buildVegetation(), buildPark() trees and the front-yard trees from world.js
+func _vegetation() -> void:
+	var try_tree := func(x: float, z: float, kind: String, sc: float, r: float) -> void:
+		if in_rect(park, x, z) or not is_clear(x, z, r):
+			return
+		_tree(x, z, kind, sc)
+	# A tree in every front lawn
+	var kinds := ["deciduous", "flowering", "deciduous", "pine"]
+	for i in houses.size():
+		var h: Dictionary = houses[i]
+		var p: Vector3 = house_xf(h.x, h.z, h.rot) * Vector3(6.0, 0, HOUSE_D / 2 + 5.6)
+		_tree(p.x, p.z, kinds[i % 4])
+	# Woodland strips between the outer houses and the wall (round Lake Maple too)
+	var x := 134.0
+	while x < 182.0:
+		var z := -178.0
+		while z < 178.0:
+			for sx in [1, -1]:
+				var r := rng.randf()
+				try_tree.call(sx * (x + (rng.randf() - 0.5) * 6), z + (rng.randf() - 0.5) * 7,
+					"pine" if r < 0.45 else ("deciduous" if r < 0.85 else "flowering"), 0.9 + rng.randf() * 0.4, 2.2)
+			z += 14.0
+		x += 13.0
+	# Back gardens: the strips between back-to-back houses
+	for bx_ in [-45.0, 45.0]:
+		var z := -150.0
+		while z <= 150.0:
+			if rng.randf() < 0.65:
+				try_tree.call(bx_ + (rng.randf() - 0.5) * 5, z + (rng.randf() - 0.5) * 8, "deciduous" if rng.randf() < 0.6 else "flowering", 0.9, 2.2)
+			z += 21.0
+	# Stadtpark: trees scattered over the lawns, the paths and the pond kept clear
+	var planted := 0
 	var tries := 0
-	while n < 70 and tries < 2000:
+	while tries < 400 and planted < 34:
 		tries += 1
-		var x := rng.randf_range(park.position.x + 2, park.end.x - 2)
-		var z := rng.randf_range(park.position.y + 2, park.end.y - 2)
-		if not is_clear(x, z, 1.5) or _near_tree(x, z, 7.0):
+		var px := park.position.x + 4 + rng.randf() * (park.size.x - 8)
+		var pz := park.position.y + 4 + rng.randf() * (park.size.y - 8)
+		if not is_clear(px, pz, 2.5) or _near_tree(px, pz, 7.0):
 			continue
-		_tree(x, z, "pine" if rng.randf() < 0.3 else ("oak" if rng.randf() < 0.5 else "linden"), rng.randf_range(0.9, 1.35))
-		n += 1
-	n = 0
-	tries = 0
-	while n < 140 and tries < 4000:
-		tries += 1
-		var x := rng.randf_range(-FENCE + 4, FENCE - 4)
-		var z := rng.randf_range(-FENCE + 4, FENCE - 4)
-		if in_rect(park, x, z, 2.0) or not is_clear(x, z, 2.0) or is_on_road(x, z, WALK + 2.5) or _near_tree(x, z, 8.0):
-			continue
-		_tree(x, z, "pine" if rng.randf() < 0.35 else "oak", rng.randf_range(0.85, 1.3))
-		n += 1
-
-
-func _commit_trees() -> void:
-	var trunk := CylinderMesh.new()
-	trunk.top_radius = 0.2
-	trunk.bottom_radius = 0.32
-	trunk.height = 1.0
-	trunk.radial_segments = 7
-	trunk.rings = 1
-	trunk.cap_top = false
-	trunk.cap_bottom = false
-	var bark := StandardMaterial3D.new()
-	bark.albedo_texture = tex("bark_col")
-	bark.normal_enabled = true
-	bark.normal_texture = tex("bark_nrm")
-	bark.uv1_scale = Vector3(2, 3, 1)
-	bark.roughness = 0.95
-	bark.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
-	_multimesh(trunk, _trunks, bark, false)
-	var crown := SphereMesh.new()
-	crown.radius = 1.0
-	crown.height = 2.0
-	crown.radial_segments = 10
-	crown.rings = 6
-	var fol := _shader_mat("res://shaders/foliage.gdshader", {"sway": 0.035, "leaf_tex": tex("foliage_leaf_col")})
-	_multimesh(crown, _crowns, fol, true)
-	var cone := CylinderMesh.new()
-	cone.top_radius = 0.0
-	cone.bottom_radius = 1.0
-	cone.height = 1.0
-	cone.radial_segments = 9
-	cone.rings = 1
-	cone.cap_top = false
-	_multimesh(cone, _cones, _shader_mat("res://shaders/foliage.gdshader", {"sway": 0.02, "leaf_tex": tex("foliage_bush_col")}), true)
-
-
-func _multimesh(mesh: Mesh, list: Array, mat: Material, colors: bool) -> void:
-	if list.is_empty():
-		return
-	var mm := MultiMesh.new()
-	mm.transform_format = MultiMesh.TRANSFORM_3D
-	mm.use_colors = colors
-	mm.mesh = mesh
-	mm.instance_count = list.size()
-	for i in list.size():
-		mm.set_instance_transform(i, list[i][0])
-		if colors:
-			mm.set_instance_color(i, list[i][1])
-	var mi := MultiMeshInstance3D.new()
-	mi.multimesh = mm
-	mi.material_override = mat
-	add_child(mi)
+		var r := rng.randf()
+		_tree(px, pz, "pine" if r < 0.25 else ("deciduous" if r < 0.7 else "flowering"), 1.0 + rng.randf() * 0.3)
+		planted += 1
+	# Two lindens at the back of the Kirchplatz
+	for p in [[church_square.position.x + 2.6, church_square.end.y - 2.4], [church_square.end.x - 2.6, church_square.end.y - 2.4]]:
+		_tree(p[0], p[1], "linden", 1.15)
 
 
 # ----------------------------------------------------------------------------------------------
@@ -1483,23 +1606,3 @@ func _mountains() -> void:
 	mi.material_override = _shader_mat("res://shaders/mountain.gdshader")
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	add_child(mi)
-	# Forest on the foothills and lower slopes
-	var placed := 0
-	var tries := 0
-	while placed < 2600 and tries < 9000:
-		tries += 1
-		var a := rng.randf() * TAU
-		var r := rng.randf_range(232.0, 760.0)
-		var x := cos(a) * r
-		var z := sin(a) * r
-		if maxf(absf(x), absf(z)) < 222:
-			continue
-		var h := mountain_height(x, z)
-		if h > 150 or h < 0.0:
-			continue
-		var slope := absf(mountain_height(x + 4, z) - h) + absf(mountain_height(x, z + 4) - h)
-		if slope > 5.0:
-			continue
-		var s := rng.randf_range(1.3, 2.6) * (1.0 + r / 600.0)
-		_tree(x, z, "pine", s, h - 0.3, false)
-		placed += 1

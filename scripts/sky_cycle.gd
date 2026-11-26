@@ -15,6 +15,9 @@ var sun: DirectionalLight3D
 var sky_mat: ShaderMaterial
 var sun_dir := Vector3.UP
 var cloud_time := 0.0
+var params := {}            # last blended keyframe values (the pond water reflects the same sky)
+var moon_dir := Vector3.UP
+var moon_amt := 0.0
 
 var KEYS := [
 	{"el": -14.0, "zenith": Color("#03060f"), "horizon": Color("#0f1828"), "ground": Color("#07080a"), "sun": Color("#ff7040"), "int": 0.0, "glow": 0.0, "disc": 0.0, "stars": 1.0, "fog": 0.009, "exp": 1.25},
@@ -127,8 +130,9 @@ func update(delta: float, focus: Vector3) -> void:
 	var el := deg_to_rad(p.el)
 	var az := deg_to_rad(90.0 + (hour - 6.0) / 12.0 * 180.0)   # east -> south -> west
 	sun_dir = Vector3(cos(el) * sin(az), sin(el), cos(el) * cos(az)).normalized()
-	var moon_dir := Vector3(-sun_dir.x * 0.6 + 0.3, maxf(0.35, -sun_dir.y), -sun_dir.z * 0.6).normalized()
-	var moon_amt := smoothstep(4.0, 12.0, -p.el) * (1.0 - weather * 0.7)
+	params = p
+	moon_dir = Vector3(-sun_dir.x * 0.6 + 0.3, maxf(0.35, -sun_dir.y), -sun_dir.z * 0.6).normalized()
+	moon_amt = smoothstep(4.0, 12.0, -p.el) * (1.0 - weather * 0.7)
 
 	var light_dir: Vector3
 	if p.el > -2.0:
@@ -165,3 +169,7 @@ func update(delta: float, focus: Vector3) -> void:
 	env.fog_density = p.fog * 0.3
 	env.tonemap_exposure = p.exp
 	env.ambient_light_energy = lerpf(1.6, 1.0, day)
+
+
+func sun_visibility() -> float:
+	return smoothstep(-1.0, 4.0, sun_elevation(hour)) * (1.0 - 0.85 * weather)

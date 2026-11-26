@@ -39,6 +39,7 @@ Then open the project once (or run `--import`) so Godot re-imports them. The `_n
 | `scripts/main.gd` | game.js | Game manager: backpack, depot, score, day/night, lamp light pool |
 | `scripts/world.gd` | world.js, oldtown.js, gothic.js, warehouse.js, citywall.js, townsquares.js | Builds the town: streets, 50 houses, church, depot, wall and Nordtor, park, ponds, trees, mountains |
 | `scripts/batch.gd` | `batchStatic()` | Merges static boxes, quads and cylinders into one mesh per material and 96 m chunk |
+| `scripts/trees.gd` | buildTree, randomCard, _buildWillowTree, buildMountains | Card trees (lindens, deciduous, blossom, pines, willows) merged into a few meshes, swaying in the wind; the far mountain forest |
 | `scripts/parcels.gd` | hoard.js, warehouse.js | The parcel piles (one MultiMesh per size), stacking, dropping, automatic depot storage |
 | `scripts/player.gd` | player.js | CharacterBody3D with step-up for kerbs, head bob, footsteps, flashlight, interaction scan |
 | `scripts/sky_cycle.gd` + `shaders/sky.gdshader` | sky.js | 20-minute day, keyframed sky colours, sun and moon, stars, clouds, weather |
@@ -65,6 +66,7 @@ Still to port:
 - [ ] Wind gusts that scatter parcels
 - [ ] Moat, drawbridge and bridgehead; the castle on its crag
 - [ ] Market stalls, fountain coin toss, church bells and clock
-- [ ] Ducks, birds, chimney smoke, playground, park benches, pier
+- [ ] Ducks, pier and benches at the ponds; birds, chimney smoke, playground, park flower beds and fountain plaza
+- [ ] Billboard clouds (the Godot sky draws its own clouds for now)
 - [ ] Basketball hoops, mailboxes, garage workshops
 - [ ] Graphics settings menu, touch controls, Android export

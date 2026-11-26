@@ -102,6 +102,18 @@
         set('foliage_leaf', tg.buildFoliage('leaf'), 4);
         set('foliage_bush', tg.buildFoliage('bush'), 4);
         emit('arms_col', canvasOf(tg.getArmsTexture()));
+        // Leaf / needle cards with alpha, and their coverage-preserving mip chains (one PNG per level)
+        const cards = { leafcard_leaf: tg.getLeafCardTexture('leaf'), leafcard_blossom: tg.getLeafCardTexture('blossom'), needlecard: tg.getNeedleCardTexture() };
+        Object.keys(cards).forEach(n => {
+            const t = cards[n];
+            emit(n + '_col', canvasOf(t));
+            (t.mipmaps || []).forEach((c, k) => emit('mips/' + n + '_' + k, c));
+        });
+        // Ponds: ripple height field, masonry wall, coping, path pavers, brick edging
+        emit('water_height', canvasOf(tg.getWaterHeightTexture()));
+        emit('masonry_col', canvasOf(tg.getStoneMasonryTexture()));
+        set('concrete', tg.buildConcrete(), 4);
+        emit('brick_7a4a36_col', canvasOf(tg.getBrickTexture('#7a4a36', '#9a9286')));
         out.dataset.done = '1';
     } catch (e) {
         out.dataset.error = String(e && e.stack || e);

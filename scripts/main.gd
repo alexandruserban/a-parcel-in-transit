@@ -103,6 +103,7 @@ func resume() -> void:
 
 func _process(delta: float) -> void:
 	sky.update(delta, player.global_position)
+	world.set_water_sky(sky.params, sky.sun_dir, sky.moon_dir, sky.moon_amt, sky.daylight(), sky.sun_visibility())
 	var night: bool = sky.is_night()
 	if night != is_night:
 		is_night = night
@@ -324,6 +325,8 @@ func _screenshot_mode() -> void:
 		[Vector3(-130, 0.1, 0), PI / 2, 0.0, 10.0, "depot"],
 		[Vector3(10, 0.1, -150), 0.0, 0.08, 17.8, "nordtor_sunset"],
 		[Vector3(30, 0.1, -12), 2.4, 0.05, 22.5, "night"],
+		[Vector3(-38, 0.1, 132), 0.15, -0.12, 15.0, "pond"],
+		[Vector3(-60, 0.1, 85), -2.6, -0.02, 11.0, "park_trees"],
 	]
 	for s in _shots:
 		player.global_position = s[0]

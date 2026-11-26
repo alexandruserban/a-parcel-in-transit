@@ -50,7 +50,9 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     count = 0
     for name, url in re.findall(r'<pre data-name="([^"]+)">data:image/png;base64,([^<]+)</pre>', dom):
-        (OUT / (name + ".png")).write_bytes(base64.b64decode(url))
+        path = OUT / (name + ".png")
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(base64.b64decode(url))
         count += 1
     print("Wrote %d textures to %s" % (count, OUT))
 
