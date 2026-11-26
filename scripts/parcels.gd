@@ -25,6 +25,7 @@ var next_block := 0
 var open_m = null
 var open_s = null
 var counts := {"S": 0, "M": 0, "L": 0}
+var stored_order: Array[String] = []   # sizes in the order they were filed (replayed when a save is loaded)
 var bay_shapes := {}
 const PER_LAYER := 80
 const LAYERS := 3
@@ -386,7 +387,52 @@ func store(size: String) -> bool:
 			open_s = null
 	_place({"size": size, "slot": _free[size].pop_back()}, x, y, z, 0.0, true)
 	counts[size] += 1
+	stored_order.append(size)
 	return true
+
+
+## Everything needed to put the parcels back where they were: loose ones by position (a parcel in mid-air
+## counts as already landed), filed ones by the order they went into the depot
+func save_state() -> Dictionary:
+	var landing := {}
+	for f in flights:
+		landing[f.rec] = f.to
+	var loose: Array = []
+	for rec in records:
+		if rec.stored:
+			continue
+		var p: Vector3 = rec.pos
+		if landing.has(rec):
+			var to: Vector3 = landing[rec]
+			p = Vector3(to.x, world.ground_y_at(to.x, to.z) + SIZES[rec.size].h / 2 + 0.01, to.z)
+		loose.append([rec.size, snappedf(p.x, 0.001), snappedf(p.y, 0.001), snappedf(p.z, 0.001), snappedf(rec.rot, 0.001)])
+	return {"total": total, "loose": loose, "stored": Array(stored_order)}
+
+
+func load_state(d: Dictionary) -> void:
+	flights.clear()
+	records.clear()
+	for size in _mm:
+		var mm: MultiMesh = _mm[size]
+		_free[size] = []
+		for i in range(mm.instance_count - 1, -1, -1):
+			mm.set_instance_transform(i, HIDDEN)
+			_free[size].append(i)
+	counts = {"S": 0, "M": 0, "L": 0}
+	next_block = 0
+	open_m = null
+	open_s = null
+	stored_order.clear()
+	for cs in bay_shapes.values():
+		(cs as CollisionShape3D).queue_free()
+	bay_shapes.clear()
+	for l in d.get("loose", []):
+		var size: String = l[0]
+		if _free.has(size) and not _free[size].is_empty():
+			_place({"size": size, "slot": _free[size].pop_back()}, l[1], l[2], l[3], l[4])
+	for size in d.get("stored", []):
+		store(String(size))
+	total = int(d.get("total", total))
 
 
 func stored_total() -> int:

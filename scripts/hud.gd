@@ -22,6 +22,10 @@ var dialogue: PanelContainer
 var dialogue_title: Label
 var dialogue_text: Label
 var menu: Control
+var stats_grid: GridContainer
+var stats_title: Label
+var play_btn: Button
+var new_btn: Button
 var minimap: Control
 var music_value: Label
 var _toast_t := 0.0
@@ -261,12 +265,38 @@ func _build_menu(root: Control) -> void:
 	slider.value_changed.connect(func(val: float) -> void:
 		game.sfx.set_music_volume(val / 100.0)
 		music_value.text = "%d%%" % int(val))
+	# your progress (filled in by set_stats when the menu opens)
+	stats_title = _label("YOUR PROGRESS", 15, Color("#94a3b8"))
+	stats_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	v.add_child(stats_title)
+	stats_grid = GridContainer.new()
+	stats_grid.columns = 4
+	stats_grid.add_theme_constant_override("h_separation", 24)
+	stats_grid.add_theme_constant_override("v_separation", 4)
+	v.add_child(stats_grid)
+	var brow := HBoxContainer.new()
+	brow.add_theme_constant_override("separation", 12)
+	v.add_child(brow)
 	var play := Button.new()
 	play.text = "TAP TO START EXPLORING" if mobile else "CLICK TO START EXPLORING"
 	play.add_theme_font_size_override("font_size", 20)
 	play.custom_minimum_size = Vector2(0, 52)
+	play.size_flags_horizontal = Control.SIZE_EXPAND_FILL
 	play.pressed.connect(func() -> void: game.resume())
-	v.add_child(play)
+	brow.add_child(play)
+	play_btn = play
+	new_btn = Button.new()
+	new_btn.text = "New game"
+	new_btn.add_theme_font_size_override("font_size", 15)
+	new_btn.custom_minimum_size = Vector2(130, 52)
+	var confirm := [false]
+	new_btn.pressed.connect(func() -> void:
+		if not confirm[0]:   # ask once more: this throws away the save
+			confirm[0] = true
+			new_btn.text = "Sure? Tap again" if mobile else "Sure? Click again"
+			return
+		game.new_game())
+	brow.add_child(new_btn)
 	var note := _label("Walk into the houses, drive the delivery truck, and watch out for the wind.", 13, Color("#94a3b8"))
 	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(note)
@@ -283,6 +313,20 @@ func _unhandled_input(event: InputEvent) -> void:
 
 func show_menu(on: bool) -> void:
 	menu.visible = on
+
+
+## The progress panel and the play button's wording (continue a saved game, or start)
+func set_stats(rows: Array, has_progress: bool) -> void:
+	for c in stats_grid.get_children():
+		c.queue_free()
+	for r in rows:
+		stats_grid.add_child(_label(r[0], 14, Color("#cbd5e1")))
+		stats_grid.add_child(_label(r[1], 14, Color("#fbbf24")))
+	stats_title.visible = has_progress
+	stats_grid.visible = has_progress
+	new_btn.visible = has_progress
+	if has_progress:
+		play_btn.text = "TAP TO CONTINUE" if mobile else "CLICK TO CONTINUE"
 
 
 func _process(delta: float) -> void:

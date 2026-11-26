@@ -813,7 +813,7 @@ func _house(idx: int, x: float, z: float, rot: float, cfg: Dictionary) -> void:
 	var number: int = cfg.number
 	var owner: String = cfg.name
 	add_interactable(bell_pos, "[E] Ring doorbell (#%d - %s)" % [number, owner], "doorbell",
-		func() -> Dictionary: return {"title": "#%d - %s" % [number, owner], "message": dialogue.get(number, "Hello there!"), "sound": "doorbell", "score": 50})
+		func() -> Dictionary: return {"title": "#%d - %s" % [number, owner], "message": dialogue.get(number, "Hello there!"), "sound": "doorbell", "score": 50, "house": number})
 	bx(front, -1.2, 2.25, 0.33, 0.3, 0.5, 0.3, mats.iron, false, false)
 	bx(front, -1.2, 2.25, 0.33, 0.26, 0.4, 0.37, mats.lamp, false, false)
 	bx(front, -1.2, 2.55, 0.2, 0.05, 0.05, 0.3, mats.iron, false, false)

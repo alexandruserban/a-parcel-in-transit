@@ -39,6 +39,14 @@ var room_lights: Array[OmniLight3D] = []
 # Wind: a steady breeze plus a gust every couple of minutes that scatters the loose parcels (world.js initWind)
 var wind := {"dir": Vector2(1, 0.3).normalized(), "strength": 0.25, "gust": 0.0, "active": false, "t": 0.0, "dur": 10.0, "next": 50.0, "time": 0.0}
 var leaves: CPUParticles3D
+# Saving: where you left off is written to user://save.json every 30 s, when you pause and when you leave
+var SAVE_PATH := "user://save.json"
+var stats := {"time": 0.0, "picked": 0, "walked": 0.0, "driven": 0.0, "gusts": 0, "doorbells": 0, "dropped": 0, "sessions": 0, "first": "", "last": "", "bells": []}
+const INT_STATS := ["picked", "gusts", "doorbells", "dropped", "sessions"]
+var _save_t := 30.0
+var _last_walk_pos := Vector3.INF
+var test_mode := false
+var loaded := false
 
 
 func _ready() -> void:
@@ -120,13 +128,28 @@ func _ready() -> void:
 		touch = Touch.new()
 		touch.game = self
 		add_child(touch)
-	hud.set_quest(0, parcels.total)
+	if "--savetest" in OS.get_cmdline_user_args():
+		SAVE_PATH = "user://save_test.json"   # never touch the real save
+	test_mode = false
+	for a in ["--smoke", "--shot", "--drive", "--stairs", "--gust", "--moat"]:
+		if a in OS.get_cmdline_user_args():
+			test_mode = true
+	if not test_mode:
+		loaded = load_game()
+		stats.sessions += 1
+		if stats.first == "":
+			stats.first = Time.get_date_string_from_system()
+	hud.set_quest(parcels.stored_total(), parcels.total)
 	hud.set_backpack(backpack, BACKPACK_CAP)
+	hud.set_score(score)
 	print("Parcels in Transit ready in %d ms: %d parcels in the town" % [Time.get_ticks_msec() - t0, parcels.total])
 
 	# Headless / CI smoke run and screenshot mode
 	if "--smoke" in OS.get_cmdline_user_args():
 		_smoke_test()
+		return
+	if "--savetest" in OS.get_cmdline_user_args():
+		_save_test()
 		return
 	if "--moat" in OS.get_cmdline_user_args():
 		_moat_test()
@@ -147,6 +170,8 @@ func _ready() -> void:
 
 
 func pause() -> void:
+	save_game()
+	hud.set_stats(stats_rows(), loaded or stats.time > 0.0)
 	get_tree().paused = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	hud.show_menu(true)
@@ -170,6 +195,10 @@ func _notification(what: int) -> void:
 	if what == NOTIFICATION_WM_GO_BACK_REQUEST or what == NOTIFICATION_APPLICATION_PAUSED:
 		if hud and not get_tree().paused:
 			pause()
+		else:
+			save_game()
+	if what == NOTIFICATION_WM_CLOSE_REQUEST or what == NOTIFICATION_APPLICATION_FOCUS_OUT:
+		save_game()
 
 
 ## Lighter settings for phones, like the web version's Low preset: lower 3D resolution, smaller and nearer
@@ -183,6 +212,7 @@ func _process(delta: float) -> void:
 	sky.update(delta, player.global_position)
 	world.set_water_sky(sky.params, sky.sun_dir, sky.moon_dir, sky.moon_amt, sky.daylight(), sky.sun_visibility())
 	birds.update(delta, sky.daylight())
+	_update_stats(delta)
 	_update_wind(delta)
 	ducks.update(delta, player.global_position)
 	var night: bool = sky.is_night()
@@ -282,6 +312,14 @@ func interact() -> void:
 		sfx.play("click")
 		return
 	var res: Dictionary = cur.call.call()
+	if res.get("sound", "") == "doorbell":
+		stats.doorbells += 1
+		# each household's greeting scores once; ringing the same bell again doesn't
+		var house: int = int(res.get("house", -1))
+		if house in stats.bells:
+			res.erase("score")
+		else:
+			stats.bells.append(house)
 	if res.has("sound"):
 		sfx.play(res.sound, -4.0)
 	if res.has("score"):
@@ -298,7 +336,7 @@ func collect(rec: Dictionary) -> void:
 	sfx.play("pickup", -6.0)
 	parcels.take(rec)
 	backpack.append(rec.size)
-	add_score(20)
+	stats.picked += 1   # (no points here: you score when a parcel is filed in the depot)
 	hud.set_backpack(backpack, BACKPACK_CAP)
 	hud.toast("Parcel into the backpack (%d/%d)" % [backpack.size(), BACKPACK_CAP])
 
@@ -334,6 +372,7 @@ func drop_one() -> void:
 		hud.toast("Can't put it there.", true)
 		return
 	backpack.pop_back()
+	stats.dropped += 1
 	sfx.play("land", -6.0)
 	hud.set_backpack(backpack, BACKPACK_CAP)
 
@@ -373,6 +412,114 @@ func toggle_weather() -> void:
 	hud.show_dialogue("Clouding over" if overcast else "Clearing up", "Grey skies rolling in: soft, shadowless light." if overcast else "The clouds are breaking up.")
 
 
+# ------------------------------------------------------------------------------------------------
+# Save game and stats
+# ------------------------------------------------------------------------------------------------
+func _update_stats(delta: float) -> void:
+	if not started or get_tree().paused:
+		return
+	stats.time += delta
+	var p: Vector3 = player.global_position
+	if truck.driving:
+		stats.driven += absf(truck.speed) * delta
+		_last_walk_pos = Vector3.INF
+	else:
+		if _last_walk_pos != Vector3.INF:
+			var step := Vector2(p.x - _last_walk_pos.x, p.z - _last_walk_pos.z).length()
+			if step < 3.0:   # ignore teleports (getting out of the truck, loading a save)
+				stats.walked += step
+		_last_walk_pos = p
+	_save_t -= delta
+	if _save_t <= 0.0:
+		_save_t = 30.0
+		save_game()
+
+
+func save_game() -> void:
+	if test_mode or not started:
+		return
+	var p: Vector3 = player.global_position
+	if truck.driving:   # you'll be standing beside the cab when you come back
+		var f: Vector2 = truck.fwd()
+		var left := Vector2(f.y, -f.x)
+		var spot: Vector2 = truck.pos + f * 1.8 + left * 2.3
+		p = Vector3(spot.x, 0.1, spot.y)
+	stats.last = Time.get_datetime_string_from_system(false, true)
+	var d := {
+		"version": 1,
+		"player": [snappedf(p.x, 0.01), snappedf(p.y + 0.05, 0.01), snappedf(p.z, 0.01), snappedf(player.yaw, 0.001), snappedf(player.pitch, 0.001)],
+		"hour": sky.hour, "weather": sky.weather_target, "score": score, "backpack": Array(backpack), "victory": victory,
+		"truck": [truck.pos.x, truck.pos.y, truck.heading, Array(truck.cargo)],
+		"parcels": parcels.save_state(),
+		"stats": stats,
+	}
+	var f := FileAccess.open(SAVE_PATH, FileAccess.WRITE)
+	if f:
+		f.store_string(JSON.stringify(d))
+
+
+func load_game() -> bool:
+	if not FileAccess.file_exists(SAVE_PATH):
+		return false
+	var d = JSON.parse_string(FileAccess.get_file_as_string(SAVE_PATH))
+	if not (d is Dictionary) or int(d.get("version", 0)) != 1:
+		return false
+	var pl: Array = d.player
+	player.global_position = Vector3(pl[0], pl[1], pl[2])
+	player.yaw = pl[3]
+	player.pitch = pl[4]
+	sky.hour = float(d.hour)
+	sky.weather_target = float(d.weather)
+	sky.weather = sky.weather_target
+	hud.weather_label.text = "[B] Weather: %s" % ("overcast" if sky.weather_target > 0.5 else "clear")
+	score = int(d.score)
+	victory = bool(d.get("victory", false))
+	backpack.clear()
+	for s in d.backpack:
+		backpack.append(String(s))
+	var tr: Array = d.truck
+	truck.pos = Vector2(tr[0], tr[1])
+	truck.heading = tr[2]
+	truck.cargo.clear()
+	for s in tr[3]:
+		truck.cargo.append(String(s))
+	truck._sync()
+	parcels.load_state(d.parcels)
+	for k in d.stats:
+		if stats.has(k):
+			stats[k] = int(d.stats[k]) if k in INT_STATS else d.stats[k]   # JSON numbers come back as floats
+	var bells: Array = []
+	for h in stats.bells:
+		bells.append(int(h))
+	stats.bells = bells
+	return true
+
+
+## Start again: forget the save and rebuild the town
+func new_game() -> void:
+	if FileAccess.file_exists(SAVE_PATH):
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
+	test_mode = true   # nothing more gets saved from this session
+	get_tree().paused = false
+	get_tree().reload_current_scene()
+
+
+static func _hms(t: float) -> String:
+	var m := int(t / 60.0)
+	return "%dh %02dm" % [m / 60, m % 60] if m >= 60 else "%d min" % m
+
+
+func stats_rows() -> Array:
+	var depot: int = parcels.stored_total()
+	return [
+		["Time played", _hms(stats.time)], ["Parcels in the depot", "%d / %d" % [depot, parcels.total]],
+		["Parcels picked up", str(stats.picked)], ["Score", str(score)],
+		["Distance walked", "%.1f km" % (stats.walked / 1000.0)], ["Distance driven", "%.1f km" % (stats.driven / 1000.0)],
+		["Gusts weathered", str(stats.gusts)], ["Doorbells rung", str(stats.doorbells)],
+		["Playing since", str(stats.first)], ["Sessions", str(stats.sessions)],
+	]
+
+
 ## Leaves and dust that blow past only during a gust
 func _make_leaves() -> void:
 	leaves = CPUParticles3D.new()
@@ -408,6 +555,7 @@ func start_gust() -> void:
 	wind.dir = Vector2(cos(a), sin(a))
 	sfx.wind_gust(wind.dur)
 	parcels.start_gust()
+	stats.gusts += 1
 	hud.show_dialogue("Gust of wind!", "A strong gust is sweeping through the town, scattering parcels everywhere. Anything stacked in the depot is safe!")
 
 
@@ -490,12 +638,59 @@ func _smoke_test() -> void:
 	var rec: Dictionary = parcels.records[0]
 	collect(rec)
 	assert(backpack.size() == 1)
+	assert(score == 0)   # picking up scores nothing
 	player.global_position = Vector3(-165, 0.2, 0)
 	await get_tree().physics_frame
 	await get_tree().physics_frame
 	deposit_all()
+	assert(score == 50)   # filing it in the depot does
+	# a filed parcel can't be picked up again: look straight at it from close by
+	var filed: Dictionary = parcels.records[parcels.records.size() - 1]
+	assert(filed.stored)
+	var eye: Vector3 = filed.pos + Vector3(0, 0.5, 1.2)
+	assert(parcels.nearest(eye, (filed.pos - eye).normalized(), 3.5) == null)
 	print("SMOKE: parcels %d -> %d, stored %d, score %d, backpack %d, player y %.2f" % [before, parcels.records.size(), parcels.stored_total(), score, backpack.size(), player.global_position.y])
 	get_tree().quit(0 if parcels.stored_total() == 1 else 1)
+
+
+## --savetest write: play a little and save;  --savetest read: load it back and report
+func _save_test() -> void:
+	var args := OS.get_cmdline_user_args()
+	var writing: bool = args[args.find("--savetest") + 1] == "write"
+	get_tree().paused = false
+	hud.show_menu(false)
+	if writing:
+		started = true
+		collect(parcels.records[0])
+		collect(parcels.records[5])
+		player.global_position = Vector3(-165, 0.1, 0)
+		await get_tree().physics_frame
+		deposit_all()
+		collect(parcels.records[10])   # a loose one (filed parcels sit at the end of the list)
+		player.global_position = Vector3(12.5, 0.1, 20.25)
+		player.yaw = 1.25
+		truck.pos = Vector2(-40, 2.5)
+		truck.cargo.append("M")
+		sky.hour = 19.5
+		score = 777
+		stats.time = 4000.0
+		stats.walked = 1234.0
+		start_gust()
+		await get_tree().create_timer(2.0).timeout
+		save_game()
+		print("SAVE: wrote; depot %d, backpack %s, loose %d" % [parcels.stored_total(), backpack, parcels.records.size() - parcels.stored_total()])
+	else:
+		print("SAVE: loaded=%s player %s yaw %.2f hour %.1f score %d backpack %s truck %s cargo %s depot %d loose %d time %s walked %.0f gusts %d sessions %d" % [
+			loaded, player.global_position, player.yaw, sky.hour, score, backpack, truck.pos, truck.cargo,
+			parcels.stored_total(), parcels.records.size() - parcels.stored_total(), _hms(stats.time), stats.walked, stats.gusts, stats.sessions])
+		if args.size() > args.find("--savetest") + 2:   # optional folder: screenshot the menu with the progress panel
+			hud.set_stats(stats_rows(), true)
+			hud.show_menu(true)
+			for i in 30:
+				await get_tree().process_frame
+			get_viewport().get_texture().get_image().save_png(args[args.find("--savetest") + 2].path_join("shot_menu_stats.png"))
+		DirAccess.remove_absolute(ProjectSettings.globalize_path(SAVE_PATH))
+	get_tree().quit()
 
 
 ## Walk out through the Nordtor over the drawbridge to the bridgehead and back; raise the bridge; try again
