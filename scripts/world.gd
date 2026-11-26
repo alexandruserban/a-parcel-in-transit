@@ -1,0 +1,1416 @@
+extends Node3D
+## Builds the old German town: valley floor, cobbled streets and slab pavements, 50 houses (half-timbered or
+## Gothic stone with stepped gables), St. Marien, the Parcel Depot, the city wall with the Nordtor, the park and
+## ponds, squares, linden avenues, street lanterns and the mountains round the valley.
+## Godot port of world.js / oldtown.js / gothic.js / warehouse.js / citywall.js / townsquares.js.
+## First iteration: the layout and dimensions match the web version; many details are simpler.
+
+const Batch := preload("res://scripts/batch.gd")
+
+const FENCE := 185.0          # inner face of the city wall
+const GROUND := 300.0
+const NS_HALF := 5.5
+const EW_HALF := 5.0
+const WALK := 4.0
+const NS_STREETS := [{"x": -90.0, "name": "Eichengasse"}, {"x": 0.0, "name": "Ulmenstraße"}, {"x": 90.0, "name": "Kiefernweg"}]
+const EW_STREETS := [{"z": -165.0, "name": "Birkenweg"}, {"z": 0.0, "name": "Ahornallee"}, {"z": 165.0, "name": "Zedernweg"}]
+const WH := {"x0": -182.0, "x1": -150.0, "z0": -22.0, "z1": 22.0, "h": 7.2, "door": 6.0}
+const HOUSE_W := 16.0
+const HOUSE_D := 14.0
+const HOUSE_H := 6.5
+
+var ns_len := 165.0 + EW_HALF
+var ew_len := 90.0 + NS_HALF
+
+# Layout data (Rect2 uses x = world x, y = world z)
+var road_rects: Array[Rect2] = []
+var paved_rects: Array[Rect2] = []
+var footprints: Array[Rect2] = []     # house + garage, depot: no trees, no parcel piles
+var tree_block: Array[Rect2] = []     # driveways, front gardens, squares: no trees
+var house_rects: Array[Rect2] = []    # house bodies
+var solids: Array = []                # {rect: Rect2, bottom: float, top: float} for everything solid
+var houses: Array = []                # {x, z, rot, number, name}
+var interactables: Array = []         # {pos: Vector3, prompt: String, type: String, call: Callable}
+var lamp_sources: Array[Vector3] = []
+var lakes: Array = []                 # {cx, cz, rw, rd, name}
+var church_rects: Array[Rect2] = []
+var small_squares: Array[Rect2] = []
+var church_square: Rect2
+var park: Rect2
+var park_blocked: Array[Rect2] = []
+var gate_spots: Array[Vector2] = []
+var tree_spots: Array[Vector2] = []
+
+var night_glows: Array = []           # [{mat, energy}] emissive materials that light up at night
+var mats := {}
+var b: Batch
+var body: StaticBody3D
+var rng := RandomNumberGenerator.new()
+
+# Tree instances, turned into MultiMeshes at the end: [Transform3D, Color]
+var _trunks: Array = []
+var _crowns: Array = []
+var _cones: Array = []
+
+var house_colors: Array = []
+var dialogue := {}
+
+
+func build() -> void:
+	rng.seed = 20251126
+	body = StaticBody3D.new()
+	body.name = "Solids"
+	add_child(body)
+	var floor_shape := CollisionShape3D.new()
+	floor_shape.shape = WorldBoundaryShape3D.new()
+	body.add_child(floor_shape)
+	b = Batch.new()
+	_make_materials()
+	_residents()
+	_plan()
+	_terrain_and_roads()
+	_houses()
+	_church()
+	_warehouse()
+	_squares()
+	_park_and_lakes()
+	_city_wall()
+	_street_lights()
+	_avenue_trees()
+	_scatter_trees()
+	_mountains()
+	_commit_trees()
+	var n := b.commit(self)
+	print("World built: %d batched meshes, %d solids, %d interactables" % [n, solids.size(), interactables.size()])
+
+
+# ----------------------------------------------------------------------------------------------
+# Materials
+# ----------------------------------------------------------------------------------------------
+func _shader_mat(path: String, params := {}) -> ShaderMaterial:
+	var m := ShaderMaterial.new()
+	m.shader = load(path)
+	for k in params:
+		m.set_shader_parameter(k, params[k])
+	return m
+
+
+func _std(color: Color, rough := 0.8, metal := 0.0) -> StandardMaterial3D:
+	var m := StandardMaterial3D.new()
+	m.albedo_color = color
+	m.roughness = rough
+	m.metallic = metal
+	return m
+
+
+func _glow(color: Color, emission: Color, energy: float, always := false) -> StandardMaterial3D:
+	var m := _std(color, 0.35)
+	m.emission_enabled = true
+	m.emission = emission
+	m.emission_energy_multiplier = energy if always else 0.0
+	if not always:
+		night_glows.append({"mat": m, "energy": energy})
+	return m
+
+
+func _make_materials() -> void:
+	mats.grass = _shader_mat("res://shaders/grass.gdshader")
+	mats.cobble = _shader_mat("res://shaders/cobble.gdshader")
+	mats.pavers = _shader_mat("res://shaders/cobble.gdshader", {"scale": 6.0, "jitter": 0.15,
+		"stone_a": Color("#a8968a"), "stone_b": Color("#8a776b"), "joint": Color("#4a4038")})
+	mats.slab = _shader_mat("res://shaders/slab.gdshader")
+	mats.gravel = _shader_mat("res://shaders/cobble.gdshader", {"scale": 22.0, "jitter": 1.0,
+		"stone_a": Color("#c9b99a"), "stone_b": Color("#a8977a"), "joint": Color("#8f8068")})
+	mats.kerb = _std(Color("#9d9b97"), 0.85)
+	mats.palestone = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color("#cfc4ae"), "mode": 1, "block": Vector2(0.7, 0.35)})
+	mats.redstone = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color("#a5604a"), "mode": 1})
+	mats.wallstone = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color("#a89a84"), "mode": 1, "block": Vector2(1.1, 0.5)})
+	mats.oak = _std(Color("#4a3222"), 0.85)
+	mats.dark_oak = _std(Color("#2f2018"), 0.8)
+	mats.frame = _std(Color("#efebe2"), 0.6)
+	mats.iron = _std(Color("#25272b"), 0.45, 0.6)
+	mats.brass = _std(Color("#d4a537"), 0.25, 0.85)
+	mats.copper = _std(Color("#5c9c84"), 0.55, 0.35)
+	mats.slate = _shader_mat("res://shaders/roof.gdshader", {"albedo": Color("#3e434b"), "tile": Vector2(0.3, 0.22), "variation": 0.15})
+	mats.clay = _shader_mat("res://shaders/roof.gdshader", {"albedo": Color("#9c4a2f")})
+	mats.recess = _std(Color("#2a2522"), 0.95)
+	mats.glass_lit = _glow(Color("#1c2836"), Color("#ffc27a"), 1.6)
+	mats.glass_dark = _std(Color("#1c2836"), 0.08, 0.2)
+	mats.glass_dark.emission_enabled = true
+	mats.glass_dark.emission = Color("#ffc27a")
+	night_glows.append({"mat": mats.glass_dark, "energy": 0.18})
+	mats.church_glass = _glow(Color("#26304a"), Color("#ff9e5a"), 2.2)
+	mats.lamp = _glow(Color("#f2e6d0"), Color("#ffc98a"), 3.5)
+	mats.hedge_std = _std(Color("#3d5a2a"), 0.95)
+	mats.water = _shader_mat("res://shaders/water.gdshader")
+	mats.lily = _std(Color("#4f7a33"), 0.7)
+	mats.bark = _std(Color("#4a3b2e"), 0.95)
+	mats.steel = _std(Color("#3c4146"), 0.5, 0.7)
+	mats.corrugated = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color("#7d8b93"), "mode": 0})
+	mats.corr_inner = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color("#b9c0c4"), "mode": 0})
+	mats.trim = _std(Color("#2f5d7c"), 0.5, 0.4)
+	mats.depot_floor = _std(Color("#8e8b85"), 0.75)
+	mats.depot_lamp = _glow(Color("#ffffff"), Color("#fff4dc"), 2.0, true)
+	mats.enamel = _std(Color("#1d4f91"), 0.3, 0.1)
+	mats.white = _std(Color("#f4f1ea"), 0.5)
+
+
+var _plaster_cache := {}
+func plaster(hex: String) -> ShaderMaterial:
+	if not _plaster_cache.has(hex):
+		_plaster_cache[hex] = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color(hex), "mode": 0})
+	return _plaster_cache[hex]
+
+
+var _stone_cache := {}
+func stone(hex: String) -> ShaderMaterial:
+	if not _stone_cache.has(hex):
+		_stone_cache[hex] = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color(hex), "mode": 1})
+	return _stone_cache[hex]
+
+
+var _roof_cache := {}
+func roof_mat(hex: String) -> ShaderMaterial:
+	if not _roof_cache.has(hex):
+		_roof_cache[hex] = _shader_mat("res://shaders/roof.gdshader", {"albedo": Color(hex)})
+	return _roof_cache[hex]
+
+
+var _std_cache := {}
+func color_mat(hex: String) -> StandardMaterial3D:
+	if not _std_cache.has(hex):
+		_std_cache[hex] = _std(Color(hex), 0.7)
+	return _std_cache[hex]
+
+
+# ----------------------------------------------------------------------------------------------
+# Residents (same households and lines as world.js)
+# ----------------------------------------------------------------------------------------------
+func _residents() -> void:
+	var first := [
+		[101, "The Millers", "Hello neighbor! Nice day for a stroll. Watch out for stray packages!"],
+		[102, "Dr. Henderson", "Good afternoon! Please don't step on Mrs. Henderson's prize petunias."],
+		[103, "The Parkers", "Hey there! Lost my basketball near the driveway earlier, have you seen it?"],
+		[104, "Tech Startup Bros", "Yo! We're building an AI app for suburban lawn management. Super disruptive!"],
+		[105, "Artist Studio", "Ah, the light today is simply sublime! Feel free to explore the backyard garden."],
+		[106, "Grandma Betty", "Oh deary, thank you for checking on me! Help yourself to some freshly baked cookies!"],
+		[107, "The Wilsons", "Afternoon! Beautiful weather in the cul-de-sac today, isn't it?"],
+		[108, "Mayor Higgins", "Greetings citizen! As honorary neighborhood mayor, I applaud your civic tidy-up duty!"],
+	]
+	for r in first:
+		house_colors.append({"number": r[0], "name": r[1]})
+		dialogue[r[0]] = r[2]
+	var surnames := ["Abbott", "Baker", "Carter", "Dalton", "Ellis", "Fischer", "Garcia", "Hughes", "Ingram", "Jensen", "Kowalski", "Lambert",
+		"Morales", "Nakamura", "Olsen", "Patel", "Quinn", "Reyes", "Sato", "Turner", "Underwood", "Vasquez", "Walsh", "Young", "Zimmer",
+		"Bennett", "Collins", "Duarte", "Evans", "Foster", "Grant", "Hayes", "Iverson", "Keller", "Lindqvist", "Murphy", "Novak",
+		"Okafor", "Price", "Rossi", "Stewart", "Thornton"]
+	var lines := [
+		"Lovely to see you! The park fountain is beautiful this time of day.",
+		"Morning! Have you seen the mountains today? Not a cloud on the peak.",
+		"Hi there! Mind the flower beds, they took me all spring.",
+		"Oh, hello! If you find a parcel with my name on it, the wind took it.",
+		"Hey neighbour! Fancy a game of hoops at the playground later?",
+		"Good day! The ducks on the pond are getting rather fat, aren't they?",
+		"Hello! I'm told the willow by the lake is over a hundred years old.",
+		"Thanks for keeping the streets tidy, it really shows!",
+	]
+	for i in surnames.size():
+		var number := 109 + i
+		house_colors.append({"number": number, "name": "The " + surnames[i] + "s"})
+		dialogue[number] = lines[i % lines.size()]
+
+
+# ----------------------------------------------------------------------------------------------
+# Helpers
+# ----------------------------------------------------------------------------------------------
+static func rect(min_x: float, min_z: float, max_x: float, max_z: float) -> Rect2:
+	return Rect2(min_x, min_z, max_x - min_x, max_z - min_z)
+
+
+static func in_rect(r: Rect2, x: float, z: float, m := 0.0) -> bool:
+	return x > r.position.x - m and x < r.end.x + m and z > r.position.y - m and z < r.end.y + m
+
+
+static func any_rect(list: Array, x: float, z: float, m := 0.0) -> bool:
+	for r in list:
+		if in_rect(r, x, z, m):
+			return true
+	return false
+
+
+## Solid box in `xf` space: collision shape + an axis-aligned record for placement tests
+func solid(xf: Transform3D, center: Vector3, size: Vector3) -> void:
+	var cs := CollisionShape3D.new()
+	var bs := BoxShape3D.new()
+	bs.size = size
+	cs.shape = bs
+	var wc := xf * center
+	cs.transform = Transform3D(xf.basis, wc)
+	body.add_child(cs)
+	var ex := xf.basis.x * size.x * 0.5
+	var ey := xf.basis.y * size.y * 0.5
+	var ez := xf.basis.z * size.z * 0.5
+	var hx := absf(ex.x) + absf(ey.x) + absf(ez.x)
+	var hy := absf(ex.y) + absf(ey.y) + absf(ez.y)
+	var hz := absf(ex.z) + absf(ey.z) + absf(ez.z)
+	solids.append({"rect": rect(wc.x - hx, wc.z - hz, wc.x + hx, wc.z + hz), "bottom": wc.y - hy, "top": wc.y + hy})
+
+
+func solid_cyl(x: float, z: float, r: float, h: float, y0 := 0.0) -> void:
+	var cs := CollisionShape3D.new()
+	var c := CylinderShape3D.new()
+	c.radius = r
+	c.height = h
+	cs.shape = c
+	cs.position = Vector3(x, y0 + h * 0.5, z)
+	body.add_child(cs)
+	solids.append({"rect": rect(x - r, z - r, x + r, z + r), "bottom": y0, "top": y0 + h})
+
+
+## Visible box (+ optional collision)
+func bx(xf: Transform3D, cx: float, cy: float, cz: float, w: float, h: float, d: float, mat, collide := false, shadow := true, uv := 1.0) -> void:
+	b.box(xf, Vector3(cx, cy, cz), Vector3(w, h, d), mat, uv, shadow)
+	if collide:
+		solid(xf, Vector3(cx, cy, cz), Vector3(w, h, d))
+
+
+static func house_xf(x: float, z: float, rot: float) -> Transform3D:
+	return Transform3D(Basis(Vector3.UP, rot), Vector3(x, 0, z))
+
+
+static func local_rect(xf: Transform3D, cx: float, cz: float, w: float, d: float) -> Rect2:
+	var c := xf * Vector3(cx, 0, cz)
+	var swap := absf(xf.basis.x.z) > 0.5
+	var sw := d if swap else w
+	var sd := w if swap else d
+	return rect(c.x - sw / 2, c.z - sd / 2, c.x + sw / 2, c.z + sd / 2)
+
+
+func flat(r: Rect2, y: float, mat: Material, uv := 1.0) -> void:
+	b.quad(Transform3D.IDENTITY, Vector3(r.position.x, y, r.position.y), Vector3(r.end.x, y, r.position.y),
+		Vector3(r.end.x, y, r.end.y), Vector3(r.position.x, y, r.end.y), mat, Vector3.UP, uv, false)
+
+
+func label(text: String, xf: Transform3D, size := 64, color := Color.WHITE, px := 0.004) -> Label3D:
+	var l := Label3D.new()
+	l.text = text
+	l.font_size = size
+	l.pixel_size = px
+	l.modulate = color
+	l.outline_size = 0
+	l.transform = xf
+	l.double_sided = false
+	add_child(l)
+	return l
+
+
+func add_interactable(pos: Vector3, prompt: String, type: String, call: Callable) -> void:
+	interactables.append({"pos": pos, "prompt": prompt, "type": type, "call": call})
+
+
+func is_on_road(x: float, z: float, margin := 0.0) -> bool:
+	return any_rect(road_rects, x, z, margin)
+
+
+func in_lake(x: float, z: float, margin := 0.0) -> bool:
+	for l in lakes:
+		var dx: float = (x - l.cx) / (l.rw + margin)
+		var dz: float = (z - l.cz) / (l.rd + margin)
+		if dx * dx + dz * dz < 1.0:
+			return true
+	return false
+
+
+func in_warehouse(x: float, z: float, m := 0.0) -> bool:
+	return x > WH.x0 + 0.2 - m and x < WH.x1 - 0.2 + m and z > WH.z0 + 0.2 - m and z < WH.z1 - 0.2 + m
+
+
+func house_at(x: float, z: float) -> bool:
+	return any_rect(house_rects, x, z)
+
+
+## Free for a tree or bush: not on a road, building, driveway, garden or pond, inside the wall
+func is_clear(x: float, z: float, r := 1.0) -> bool:
+	if absf(x) > FENCE - 2 or absf(z) > FENCE - 2:
+		return false
+	if is_on_road(x, z, r) or any_rect(footprints, x, z, r) or any_rect(tree_block, x, z, r):
+		return false
+	if in_lake(x, z, 2.6 + r) or any_rect(park_blocked, x, z, r) or any_rect(church_rects, x, z, r + 2):
+		return false
+	return true
+
+
+## Ground height under a parcel (pavements are 0.25 m up, the depot floor 6 cm)
+func ground_y_at(x: float, z: float) -> float:
+	if in_warehouse(x, z):
+		return 0.06
+	if is_on_road(x, z):
+		return 0.03
+	if is_on_road(x, z, WALK):
+		return 0.25
+	return 0.0
+
+
+func surface_at(x: float, z: float) -> String:
+	if house_at(x, z) or is_on_road(x, z, WALK) or any_rect(paved_rects, x, z) or in_warehouse(x, z):
+		return "hard"
+	return "grass"
+
+
+func random_spot(range_m: float) -> Vector2:
+	for i in 40:
+		var x := rng.randf_range(-range_m, range_m)
+		var z := rng.randf_range(-range_m, range_m)
+		if any_rect(footprints, x, z, 1.0) or in_lake(x, z, 3.0) or in_warehouse(x, z, 3.0) or any_rect(church_rects, x, z, 1.0):
+			continue
+		return Vector2(x, z)
+	return Vector2(0, 3)
+
+
+func set_night(on: bool) -> void:
+	for g in night_glows:
+		g.mat.emission_energy_multiplier = g.energy if on else 0.0
+
+
+# ----------------------------------------------------------------------------------------------
+# Village plan: three N-S streets joined by the Ahornallee and two loop roads; 50 house lots
+# ----------------------------------------------------------------------------------------------
+var lots: Array = []
+
+func _plan() -> void:
+	for s in NS_STREETS:
+		road_rects.append(rect(s.x - NS_HALF, -ns_len, s.x + NS_HALF, ns_len))
+	for s in EW_STREETS:
+		road_rects.append(rect(-ew_len, s.z - EW_HALF, ew_len, s.z + EW_HALF))
+	# The Ulmenstraße carries on north to the Nordtor
+	road_rects.append(rect(-NS_HALF, -FENCE + 0.5, NS_HALF, -ns_len))
+	park = rect(-90 + NS_HALF + WALK, EW_HALF + WALK, -NS_HALF - WALK, 165 - EW_HALF - WALK)
+	for st in NS_STREETS:
+		for side in [-1, 1]:
+			for g in [-1, 1]:
+				for i in 5:
+					var hx: float = st.x + side * 30
+					var lz: float = g * (12.5 + 14 + i * 28)
+					if in_rect(park, hx, lz):
+						continue
+					lots.append({"hx": hx, "lz": lz, "side": side, "sx": st.x})
+	# The original eight residents keep their homes on the Ulmenstraße, closest to the middle of the town
+	lots.sort_custom(_lot_less)
+	# Delivery truck spot on the Ahornallee (kept clear for later)
+	tree_block.append(rect(-30, 0.4, -20, 4.6))
+	lakes.append({"cx": -45.0, "cz": 112.0, "rw": 22.0, "rd": 16.0, "name": "Park Pond"})
+	lakes.append({"cx": 150.0, "cz": 60.0, "rw": 18.0, "rd": 13.0, "name": "Lake Maple"})
+
+
+static func _lot_less(a: Dictionary, c: Dictionary) -> bool:
+	var ka := [absf(a.sx), absf(a.lz), a.lz, a.side]
+	var kc := [absf(c.sx), absf(c.lz), c.lz, c.side]
+	for k in 4:
+		if ka[k] != kc[k]:
+			return ka[k] < kc[k]
+	return false
+
+
+# ----------------------------------------------------------------------------------------------
+# Ground, streets, pavements
+# ----------------------------------------------------------------------------------------------
+func _terrain_and_roads() -> void:
+	var G := GROUND
+	var ground := MeshInstance3D.new()
+	var pm := PlaneMesh.new()
+	pm.size = Vector2(2 * G, 2 * G)
+	pm.subdivide_width = 24
+	pm.subdivide_depth = 24
+	ground.mesh = pm
+	ground.material_override = mats.grass
+	ground.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(ground)
+
+	for s in NS_STREETS:
+		flat(rect(s.x - NS_HALF, -ns_len, s.x + NS_HALF, ns_len), 0.02, mats.cobble)
+	for s in EW_STREETS:
+		flat(rect(-ew_len, s.z - EW_HALF, ew_len, s.z + EW_HALF), 0.025, mats.cobble)
+	flat(rect(-NS_HALF, -FENCE - 6, NS_HALF, -ns_len), 0.02, mats.cobble)
+
+	# Pavements along each street between the junctions, so they never sit on a road
+	var NS := NS_HALF
+	var EW := EW_HALF
+	var W := WALK
+	var z_cuts := [-165.0, 0.0, 165.0]
+	for s in NS_STREETS:
+		for side in [-1, 1]:
+			var x: float = s.x + side * (NS + W / 2)
+			for i in z_cuts.size() - 1:
+				var z0: float = z_cuts[i] + EW
+				var z1: float = z_cuts[i + 1] - EW
+				_sidewalk(x, (z0 + z1) / 2, W, z1 - z0, 0.25, "x", s.x + side * (NS + 0.11))
+	var x_cuts := [-90.0, 0.0, 90.0]
+	var x_edge := ew_len + W
+	for e in EW_STREETS:
+		for side in [-1, 1]:
+			var z: float = e.z + side * (EW + W / 2)
+			var kz: float = e.z + side * (EW + 0.11)
+			var outer: bool = absf(z) > absf(e.z) and absf(e.z) > 1
+			if outer:
+				if e.z < 0:
+					_sidewalk((-x_edge - NS) / 2, z, x_edge - NS, W, 0.245, "z", kz)
+					_sidewalk((NS + x_edge) / 2, z, x_edge - NS, W, 0.245, "z", kz)
+				else:
+					_sidewalk(0, z, x_edge * 2, W, 0.245, "z", kz)
+				continue
+			var stops := [-x_edge]
+			for xc in x_cuts:
+				stops.append(xc - NS)
+				stops.append(xc + NS)
+			stops.append(x_edge)
+			for i in range(0, stops.size(), 2):
+				var a: float = stops[i]
+				var c: float = stops[i + 1]
+				if c - a > 0.5:
+					_sidewalk((a + c) / 2, z, c - a, W, 0.245, "z", kz)
+	# Outer corners where the loop roads end against the outer streets
+	for sx in [-1, 1]:
+		for sz in [-1, 1]:
+			var x: float = sx * (ew_len + W / 2)
+			var z0: float = sz * (165 - EW)
+			var z1: float = sz * (165 + EW + W)
+			_sidewalk(x, (z0 + z1) / 2, W, absf(z1 - z0), 0.248, "", 0)
+
+
+## Pavement of sandstone slabs with a granite kerb along the road edge (axis "x": kerb runs along z at x = k)
+func _sidewalk(x: float, z: float, w: float, l: float, h: float, axis: String, k: float) -> void:
+	var I := Transform3D.IDENTITY
+	b.box(I, Vector3(x, h / 2, z), Vector3(w, h, l), mats.slab, 1.0, false)
+	solid(I, Vector3(x, h / 2, z), Vector3(w, h, l))
+	if axis == "x":
+		b.box(I, Vector3(k, (h + 0.015) / 2, z), Vector3(0.24, h + 0.015, l), mats.kerb, 1.0, false)
+	elif axis == "z":
+		b.box(I, Vector3(x, (h + 0.015) / 2, k), Vector3(w, h + 0.015, 0.24), mats.kerb, 1.0, false)
+
+
+# ----------------------------------------------------------------------------------------------
+# Houses
+# ----------------------------------------------------------------------------------------------
+const PLASTERS := ["#efe6d2", "#e8d9b5", "#f1e3c8", "#dcc9a3", "#e9d3c0", "#d9c7a8", "#f0ead8", "#e2c9a6", "#cfd6c4", "#e8cfc0", "#f3e9c6", "#d8c3b0"]
+const ROOFS := ["#9c4a2f", "#8a3f2a", "#a55a3a", "#7a3a2a", "#94503a", "#4a4f57"]
+const STONES := ["#c9b89a", "#b9a587", "#d3c4a8", "#a8714f", "#bfae94"]
+const SHUTTERS := ["#2f5d3a", "#6b2a24", "#2d4a6b", "#4a3222", "#3c5a52"]
+const DOORS := ["#4a3222", "#6b2a24", "#2f5d3a", "#2d4a6b", "#5a3a28"]
+
+static func hash01(a: int, c: int) -> float:
+	var h := (a * 374761393 + c * 668265263) & 0x7fffffff
+	h = ((h ^ (h >> 13)) * 1274126177) & 0x7fffffff
+	return float(h % 10000) / 10000.0
+
+
+func _style(idx: int) -> Dictionary:
+	var gothic := hash01(idx, 1) < 0.33 and idx != 0
+	return {
+		"gothic": gothic,
+		"plaster": PLASTERS[int(hash01(idx, 2) * PLASTERS.size())],
+		"stone": STONES[int(hash01(idx, 3) * STONES.size())],
+		"roof": ROOFS[int(hash01(idx, 4) * ROOFS.size())],
+		"timber": not gothic and hash01(idx, 5) < 0.75,
+		"ridge_z": gothic or hash01(idx, 6) < 0.7,
+		"pitch": deg_to_rad(48.0 + hash01(idx, 7) * 8.0),
+		"shutter": SHUTTERS[int(hash01(idx, 8) * SHUTTERS.size())],
+		"door": DOORS[int(hash01(idx, 9) * DOORS.size())],
+		"hedge": hash01(idx, 10) < 0.45,
+	}
+
+
+func _houses() -> void:
+	for idx in lots.size():
+		var lot: Dictionary = lots[idx]
+		var rot := PI / 2 if lot.side < 0 else -PI / 2
+		var z: float = lot.lz - 2 if lot.side < 0 else lot.lz + 2
+		_house(idx, lot.hx, z, rot, house_colors[idx % house_colors.size()])
+
+
+## Facade frame: the wall plane at z = 0 facing +z, u along +x. face: 0 front, 1 right (+x), 2 back, 3 left
+static func face_xf(xf: Transform3D, face: int) -> Transform3D:
+	var angles := [0.0, PI / 2, PI, -PI / 2]
+	var ang: float = angles[face]
+	var depth := HOUSE_D if face % 2 == 0 else HOUSE_W
+	var basis := Basis(Vector3.UP, ang)
+	return xf * Transform3D(basis, basis * Vector3(0, 0, depth / 2))
+
+
+func _house(idx: int, x: float, z: float, rot: float, cfg: Dictionary) -> void:
+	var xf := house_xf(x, z, rot)
+	var st := _style(idx)
+	var W := HOUSE_W
+	var D := HOUSE_D
+	var H := HOUSE_H
+	var gothic: bool = st.gothic
+	var wall: Material = stone(st.stone) if gothic else plaster(st.plaster)
+	houses.append({"x": x, "z": z, "rot": rot, "number": cfg.number, "name": cfg.name})
+	footprints.append(local_rect(xf, -3.5, 1.6, 23.5, 17.8))
+	tree_block.append(local_rect(xf, -11.5, D / 2 + 5, 6.5, 16))
+	tree_block.append(local_rect(xf, 0, 12.0, 16, 10))
+	house_rects.append(local_rect(xf, 0, 0, W, D))
+
+	# Body on a stone plinth (solid for now: interiors come in a later iteration)
+	bx(xf, 0, H / 2, 0, W, H, D, wall, true)
+	bx(xf, 0, 0.3, 0, W + 0.14, 0.6, D + 0.14, mats.palestone)
+
+	# Gable roof: ridge front-to-back (gable to the street) or along the street
+	var t := tan(st.pitch)
+	var e := 0.6
+	var verge := 0.0 if gothic else 0.45
+	var rmat := roof_mat(st.roof)
+	var half: float
+	var rise: float
+	if st.ridge_z:
+		half = W / 2
+		rise = half * t
+		var L := D / 2 + verge
+		var yl := H - e * t
+		b.quad(xf, Vector3(-half - e, yl, -L), Vector3(-half - e, yl, L), Vector3(0, H + rise, L), Vector3(0, H + rise, -L), rmat, Vector3(-1, 1, 0))
+		b.quad(xf, Vector3(half + e, yl, -L), Vector3(half + e, yl, L), Vector3(0, H + rise, L), Vector3(0, H + rise, -L), rmat, Vector3(1, 1, 0))
+		b.tri(xf, Vector3(-half, H, D / 2), Vector3(half, H, D / 2), Vector3(0, H + rise, D / 2), wall, Vector3.BACK)
+		b.tri(xf, Vector3(-half, H, -D / 2), Vector3(half, H, -D / 2), Vector3(0, H + rise, -D / 2), wall, Vector3.FORWARD)
+		bx(xf, 0, H + rise + 0.05, 0, 0.3, 0.2, 2 * L + 0.1, mats.dark_oak)
+	else:
+		half = D / 2
+		rise = half * t
+		var L := W / 2 + verge
+		var yl := H - e * t
+		b.quad(xf, Vector3(-L, yl, half + e), Vector3(L, yl, half + e), Vector3(L, H + rise, 0), Vector3(-L, H + rise, 0), rmat, Vector3(0, 1, 1))
+		b.quad(xf, Vector3(-L, yl, -half - e), Vector3(L, yl, -half - e), Vector3(L, H + rise, 0), Vector3(-L, H + rise, 0), rmat, Vector3(0, 1, -1))
+		b.tri(xf, Vector3(W / 2, H, -half), Vector3(W / 2, H, half), Vector3(W / 2, H + rise, 0), wall, Vector3.RIGHT)
+		b.tri(xf, Vector3(-W / 2, H, -half), Vector3(-W / 2, H, half), Vector3(-W / 2, H + rise, 0), wall, Vector3.LEFT)
+		bx(xf, 0, H + rise + 0.05, 0, 2 * L + 0.1, 0.2, 0.3, mats.dark_oak)
+		# Attic windows in the side gable
+		var fr := face_xf(xf, 1)
+		for u in [-1.4, 1.4]:
+			_window(fr, u, H + 1.6, 0.8, 1.1, st)
+
+	var front := face_xf(xf, 0)
+	if gothic:
+		_gothic_front(xf, front, st, rise, wall)
+	else:
+		if st.timber:
+			_fachwerk(xf, st, rise)
+		if st.ridge_z:
+			# Attic windows in the street gable
+			for u in [-1.4, 1.4]:
+				_window(front, u, H + 1.6, 0.8, 1.1, st)
+			_window(front, 0, H + 4.2, 0.6, 0.8, st)
+
+	# Windows: front, sides and back
+	var ground_u := [-5.5, -3.0, 3.0, 5.5]
+	var upper_u := [-5.5, -2.75, 0.0, 2.75, 5.5]
+	if not gothic:
+		for u in ground_u:
+			_window(front, u, 1.75, 1.1, 1.4, st)
+	for u in upper_u:
+		if gothic:
+			_lancet(front, u, 4.4, 0.8, 2.0, st)
+		else:
+			_window(front, u, 4.75, 1.1, 1.4, st)
+	var side_f := face_xf(xf, 1)   # the garage and its lean-to roof cover the other side wall
+	for u in [-4.0, 0.0, 4.0]:
+		_window(side_f, u, 1.75, 1.1, 1.4, st)
+		_window(side_f, u, 4.75, 1.1, 1.4, st)
+	var back := face_xf(xf, 2)
+	for u in [-5.0, -1.5, 2.0, 5.5]:
+		_window(back, u, 1.75, 1.1, 1.4, st)
+		_window(back, u, 4.75, 1.1, 1.4, st)
+
+	# Chimney through the roof
+	var ch_x := W * 0.3
+	var ch_z := D * 0.2
+	var roof_y: float = (H + rise - absf(ch_x) * t) if st.ridge_z else (H + rise - absf(ch_z) * t)
+	var ch_top := roof_y + 1.3
+	bx(xf, ch_x, (ch_top + H - 0.2) / 2, ch_z, 1.1, ch_top - H + 0.2, 1.1, plaster("#d9d2c4"))
+	bx(xf, ch_x, ch_top + 0.07, ch_z, 1.35, 0.14, 1.35, mats.palestone)
+
+	# Entrance: sandstone step, door frame, door, canopy, number plate, doorbell, porch lantern
+	bx(front, 0, 0.09, 0.45, 2.4, 0.18, 0.9, mats.palestone)
+	bx(front, 0, 1.3, 0.03, 1.7, 2.6, 0.08, mats.palestone)
+	bx(front, 0, 1.2, 0.08, 1.2, 2.3, 0.06, color_mat(st.door))
+	bx(front, 0.4, 1.15, 0.13, 0.08, 0.08, 0.06, mats.brass, false, false)
+	if not gothic:
+		bx(front, 0, 2.85, 0.5, 2.2, 0.1, 1.0, rmat)
+	bx(front, 0, 2.98 if not gothic else 3.2, 0.05, 0.8, 0.4, 0.04, mats.enamel, false, false)
+	label(str(cfg.number), front * Transform3D(Basis(), Vector3(0, 2.98 if not gothic else 3.2, 0.075)), 72, Color.WHITE, 0.0045)
+	bx(front, 0.95, 1.3, 0.06, 0.2, 0.3, 0.12, mats.brass, false, false)
+	var bell_pos := front * Vector3(0.95, 1.3, 0.1)
+	var number: int = cfg.number
+	var owner: String = cfg.name
+	add_interactable(bell_pos, "[E] Ring doorbell (#%d - %s)" % [number, owner], "doorbell",
+		func() -> Dictionary: return {"title": "#%d - %s" % [number, owner], "message": dialogue.get(number, "Hello there!"), "sound": "doorbell", "score": 50})
+	bx(front, -1.2, 2.25, 0.33, 0.3, 0.5, 0.3, mats.iron, false, false)
+	bx(front, -1.2, 2.25, 0.33, 0.26, 0.4, 0.37, mats.lamp, false, false)
+	bx(front, -1.2, 2.55, 0.2, 0.05, 0.05, 0.3, mats.iron, false, false)
+	lamp_sources.append(front * Vector3(-1.2, 2.3, 0.6))
+
+	# Garage against the left wall: lean-to roof, plank door
+	var gw := 7.0
+	var gx := -W / 2 - gw / 2
+	bx(xf, gx, 1.6, -1, gw, 3.2, 9, wall, true)
+	b.quad(xf, Vector3(-W / 2, 4.6, -5.8), Vector3(-W / 2, 4.6, 3.8), Vector3(-W / 2 - gw - 0.4, 3.05, 3.8), Vector3(-W / 2 - gw - 0.4, 3.05, -5.8), rmat, Vector3(-0.5, 1, 0))
+	b.tri(xf, Vector3(-W / 2 - gw, 3.2, 3.5), Vector3(-W / 2, 3.2, 3.5), Vector3(-W / 2, 4.6, 3.5), wall, Vector3.BACK)
+	b.tri(xf, Vector3(-W / 2 - gw, 3.2, -5.5), Vector3(-W / 2, 3.2, -5.5), Vector3(-W / 2, 4.6, -5.5), wall, Vector3.FORWARD)
+	bx(xf, gx, 1.35, 3.53, 5.4, 2.7, 0.08, color_mat(st.door))
+	for k in 5:
+		bx(xf, gx - 2.2 + k * 1.1, 1.35, 3.58, 0.06, 2.6, 0.03, mats.dark_oak, false, false)
+
+	# Driveway of pavers to the pavement, garden path, front garden wall or hedge with a gate gap
+	var dl := 16.6
+	b.quad(xf, Vector3(gx - 3.25, 0.05, D / 2 - 3), Vector3(gx + 3.25, 0.05, D / 2 - 3), Vector3(gx + 3.25, 0.05, D / 2 - 3 + dl), Vector3(gx - 3.25, 0.05, D / 2 - 3 + dl), mats.pavers, Vector3.UP, 1.0, false)
+	paved_rects.append(local_rect(xf, gx, D / 2 - 3 + dl / 2, 6.5, dl))
+	b.quad(xf, Vector3(-0.7, 0.04, D / 2), Vector3(0.7, 0.04, D / 2), Vector3(0.7, 0.04, 17), Vector3(-0.7, 0.04, 17), mats.slab, Vector3.UP, 1.0, false)
+	for seg in [[-W / 2, -1.1], [1.1, W / 2]]:
+		var c: float = (seg[0] + seg[1]) / 2
+		var len: float = seg[1] - seg[0]
+		if st.hedge:
+			bx(xf, c, 0.55, 17, len, 1.1, 0.7, mats.hedge_std, true)
+		else:
+			bx(xf, c, 0.4, 17, len, 0.8, 0.35, mats.palestone, true)
+			bx(xf, c, 0.85, 17, len + 0.05, 0.1, 0.45, mats.palestone)
+	var gate := xf * Vector3(0, 0, 17)
+	gate_spots.append(Vector2(gate.x, gate.z))
+
+
+## One window on a facade frame: glass, frame, mullion cross, sill, shutters on timber houses
+func _window(f: Transform3D, u: float, y: float, w: float, h: float, st: Dictionary, _z := 0.0, shutters := true) -> void:
+	var lit := hash01(int(f.origin.x * 7 + u * 13), int(f.origin.z * 3 + y * 11)) < 0.6
+	bx(f, u, y, 0.02, w, h, 0.06, mats.glass_lit if lit else mats.glass_dark, false, false)
+	var ft := 0.09
+	bx(f, u, y + h / 2 + ft / 2, 0.06, w + 2 * ft, ft, 0.1, mats.frame, false, false)
+	bx(f, u - w / 2 - ft / 2, y, 0.06, ft, h, 0.1, mats.frame, false, false)
+	bx(f, u + w / 2 + ft / 2, y, 0.06, ft, h, 0.1, mats.frame, false, false)
+	bx(f, u, y, 0.07, 0.05, h, 0.04, mats.frame, false, false)
+	bx(f, u, y + h * 0.15, 0.07, w, 0.05, 0.04, mats.frame, false, false)
+	bx(f, u, y - h / 2 - 0.06, 0.1, w + 0.3, 0.12, 0.2, mats.palestone, false, false)
+	if shutters and st.timber and h > 1.0:
+		var sm := color_mat(st.shutter)
+		bx(f, u - w / 2 - ft - w / 4 - 0.02, y, 0.06, w / 2, h, 0.05, sm, false, false)
+		bx(f, u + w / 2 + ft + w / 4 + 0.02, y, 0.06, w / 2, h, 0.05, sm, false, false)
+
+
+## Gothic lancet: tall narrow window with a pointed head and a stone hood mould
+func _lancet(f: Transform3D, u: float, y: float, w: float, h: float, _st: Dictionary) -> void:
+	bx(f, u, y, 0.02, w, h, 0.06, mats.glass_lit, false, false)
+	b.tri(f, Vector3(u - w / 2, y + h / 2, 0.05), Vector3(u + w / 2, y + h / 2, 0.05), Vector3(u, y + h / 2 + w * 0.8, 0.05), mats.glass_lit, Vector3.BACK, 1.0, false)
+	bx(f, u - w / 2 - 0.07, y + 0.1, 0.07, 0.14, h + 0.2, 0.12, mats.palestone, false, false)
+	bx(f, u + w / 2 + 0.07, y + 0.1, 0.07, 0.14, h + 0.2, 0.12, mats.palestone, false, false)
+	bx(f, u, y - h / 2 - 0.06, 0.1, w + 0.4, 0.12, 0.2, mats.palestone, false, false)
+
+
+## Timber frame (Fachwerk): sill, floor and wall-plate beams, posts between the openings, corner braces
+func _fachwerk(xf: Transform3D, st: Dictionary, rise: float) -> void:
+	var H := HOUSE_H
+	for face in 4:
+		var f := face_xf(xf, face)
+		var width := HOUSE_W if face % 2 == 0 else HOUSE_D
+		var hw := width / 2
+		for y in [0.68, 3.25, 6.35]:
+			bx(f, 0, y, 0.04, width, 0.18, 0.06, mats.oak, false, false)
+		var posts: Array = []
+		if face % 2 == 0:
+			posts = [-hw + 0.1, -7.0, -4.25, -1.6, 1.6, 4.25, 7.0, hw - 0.1]
+		else:
+			posts = [-hw + 0.1, -6.0, -2.0, 2.0, 6.0, hw - 0.1]
+		for p in posts:
+			bx(f, p, (0.68 + 6.35) / 2, 0.04, 0.16, 6.35 - 0.68, 0.06, mats.oak, false, false)
+		# K-braces in the corner panels of the upper floor
+		for s in [-1, 1]:
+			var x0: float = s * (hw - 0.1)
+			var x1: float = s * (hw - 1.3) if face % 2 == 0 else s * (hw - 1.0)
+			var mid := Vector3((x0 + x1) / 2, (3.25 + 6.35) / 2, 0.04)
+			var dx := x1 - x0
+			var dy := 6.35 - 3.25
+			var ang := atan2(dy, dx)
+			b.box(f * Transform3D(Basis(Vector3.BACK, ang), mid), Vector3.ZERO, Vector3(sqrt(dx * dx + dy * dy), 0.15, 0.06), mats.oak, 1.0, false)
+	# Collar beam and king post in the street gable
+	if st.ridge_z:
+		var f0 := face_xf(xf, 0)
+		var yc := H + rise * 0.42
+		bx(f0, 0, yc, 0.04, HOUSE_W * (1 - 0.42) - 0.2, 0.16, 0.06, mats.oak, false, false)
+		bx(f0, 0, H + rise * 0.21, 0.04, 0.16, rise * 0.42, 0.06, mats.oak, false, false)
+		for s in [-1, 1]:
+			bx(f0, s * 4.0, H + rise * 0.21, 0.04, 0.16, rise * 0.4, 0.06, mats.oak, false, false)
+
+
+## Gothic stone front: stepped gable and a ground-floor arcade of pointed arches
+func _gothic_front(xf: Transform3D, front: Transform3D, st: Dictionary, rise: float, wall: Material) -> void:
+	var H := HOUSE_H
+	var W := HOUSE_W
+	var n := 6
+	for i in n:
+		var y0 := H + rise * i / n
+		var y1 := H + rise * (i + 1) / n
+		var w := W * (1.0 - float(i) / n) + 0.2
+		var top := y1 + 0.55
+		bx(front, 0, (y0 + top) / 2, -0.3, w, top - y0, 0.65, wall)
+		bx(front, 0, top + 0.06, -0.3, w + 0.12, 0.12, 0.8, mats.palestone)
+	# small lancets in the gable
+	_lancet(front, -1.5, H + 2.0, 0.7, 1.5, st)
+	_lancet(front, 1.5, H + 2.0, 0.7, 1.5, st)
+	_lancet(front, 0, H + 4.6, 0.6, 1.2, st)
+	# arcade: three pointed openings, the door sits in the middle one
+	for u in [-4.6, 4.6]:
+		bx(front, u, 1.45, 0.01, 3.0, 2.9, 0.04, mats.recess, false, false)
+		b.tri(front, Vector3(u - 1.5, 2.9, 0.035), Vector3(u + 1.5, 2.9, 0.035), Vector3(u, 4.0, 0.035), mats.recess, Vector3.BACK, 1.0, false)
+	for u in [-6.9, -2.3, 2.3, 6.9]:
+		bx(front, u, 1.5, 0.15, 0.45, 3.0, 0.3, mats.palestone, false)
+	bx(front, 0, 3.3, 0.12, W, 0.2, 0.25, mats.palestone, false, false)    # string course
+	bx(front, 0, 3.75, 0.55, 12.0, 0.12, 1.0, mats.palestone, false)        # balcony slab
+	for k in 25:
+		bx(front, -6 + k * 0.5, 4.2, 1.0, 0.05, 0.8, 0.05, mats.iron, false, false)
+	bx(front, 0, 4.62, 1.0, 12.0, 0.06, 0.08, mats.iron, false, false)
+
+
+# ----------------------------------------------------------------------------------------------
+# St. Marien on the Kirchplatz
+# ----------------------------------------------------------------------------------------------
+func _church() -> void:
+	var I := Transform3D.IDENTITY
+	var CX := -45.0
+	var rs: Material = mats.redstone
+	church_square = rect(-66, EW_HALF + WALK, -24, 26)
+	paved_rects.append(church_square)
+	flat(church_square, 0.035, mats.cobble)
+	park_blocked.append(rect(-70, 7, -20, 68))
+	# Tower
+	bx(I, CX, 17, 30.5, 9, 34, 9, rs, true)
+	church_rects.append(rect(CX - 4.5, 26, CX + 4.5, 35))
+	for sx in [-1, 1]:
+		for sz in [-1, 1]:
+			bx(I, CX + sx * 4.3, 13, 30.5 + sz * 4.3, 1.5, 26, 1.5, rs)
+			bx(I, CX + sx * 4.3, 26.6, 30.5 + sz * 4.3, 1.1, 1.2, 1.1, rs)
+			b.cylinder(I, Vector3(CX + sx * 4.1, 34, 30.5 + sz * 4.1), 0.6, 0.0, 3.5, 6, rs)
+	bx(I, CX, 34.1, 30.5, 9.4, 0.25, 9.4, mats.palestone)
+	# belfry openings and clock faces
+	var faces := [[Vector3(0, 0, -1), Vector3(1, 0, 0)], [Vector3(0, 0, 1), Vector3(1, 0, 0)], [Vector3(1, 0, 0), Vector3(0, 0, 1)], [Vector3(-1, 0, 0), Vector3(0, 0, 1)]]
+	for fc in faces:
+		var n: Vector3 = fc[0]
+		var t: Vector3 = fc[1]
+		for s in [-1.3, 1.3]:
+			var c: Vector3 = Vector3(CX, 29, 30.5) + n * 4.52 + t * s
+			b.box(I, c, Vector3(1.0, 3.2, 1.0) * (Vector3.ONE - n.abs()) + n.abs() * 0.05, mats.recess, 1.0, false)
+		var cc := Vector3(CX, 23.5, 30.5) + n * 4.55
+		var cxf := Transform3D(Basis.looking_at(-n, Vector3.UP), cc)
+		b.cylinder(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3.ZERO), Vector3.ZERO, 1.5, 1.5, 0.06, 20, mats.white, true, 1.0, false)
+		b.box(cxf, Vector3(0, 0.45, 0.08), Vector3(0.1, 1.0, 0.03), mats.iron, 1.0, false)
+		b.box(cxf, Vector3(0.3, 0, 0.09), Vector3(0.7, 0.08, 0.03), mats.iron, 1.0, false)
+	# Copper spire with a gilded cross
+	b.cylinder(I, Vector3(CX, 34.2, 30.5), 4.0, 0.0, 29, 8, mats.copper)
+	bx(I, CX, 64.2, 30.5, 0.12, 2.4, 0.12, mats.brass)
+	bx(I, CX, 64.6, 30.5, 1.2, 0.12, 0.12, mats.brass)
+	# Door in the tower
+	bx(I, CX, 2.0, 25.98, 2.4, 4.0, 0.08, mats.dark_oak)
+	b.tri(I, Vector3(CX - 1.2, 4.0, 25.97), Vector3(CX + 1.2, 4.0, 25.97), Vector3(CX, 5.4, 25.97), mats.dark_oak, Vector3.FORWARD)
+	add_interactable(Vector3(CX, 1.6, 25.6), "[E] Look at St. Marien", "church",
+		func() -> Dictionary: return {"title": "St. Marien", "message": "A red sandstone Gothic church with a 63 m copper spire. Its bells and the inside come in a later version of the Godot port.", "sound": "click"})
+	# Nave
+	bx(I, CX, 7, 48, 14, 14, 26, rs, true)
+	church_rects.append(rect(CX - 7, 35, CX + 7, 61))
+	var rise := 10.0
+	b.quad(I, Vector3(CX - 7.6, 13.6, 34.6), Vector3(CX - 7.6, 13.6, 61.4), Vector3(CX, 14 + rise, 61.4), Vector3(CX, 14 + rise, 34.6), mats.slate, Vector3(-1, 1, 0))
+	b.quad(I, Vector3(CX + 7.6, 13.6, 34.6), Vector3(CX + 7.6, 13.6, 61.4), Vector3(CX, 14 + rise, 61.4), Vector3(CX, 14 + rise, 34.6), mats.slate, Vector3(1, 1, 0))
+	b.tri(I, Vector3(CX - 7, 14, 35), Vector3(CX + 7, 14, 35), Vector3(CX, 14 + rise, 35), rs, Vector3.FORWARD)
+	b.tri(I, Vector3(CX - 7, 14, 61), Vector3(CX + 7, 14, 61), Vector3(CX, 14 + rise, 61), rs, Vector3.BACK)
+	# Apse
+	b.cylinder(I, Vector3(CX, 0, 61), 5.6, 5.6, 13, 8, rs, false)
+	b.cylinder(I, Vector3(CX, 13, 61), 6.0, 0.0, 6.5, 8, mats.slate)
+	solid_cyl(CX, 61, 5.6, 13)
+	church_rects.append(rect(CX - 5.6, 61, CX + 5.6, 66.6))
+	# Lancets and stepped buttresses along the nave
+	for sx in [-1, 1]:
+		var f := Transform3D(Basis(Vector3.UP, sx * PI / 2), Vector3(CX + sx * 7, 0, 0))
+		for zc in [38.5, 43.5, 48.5, 53.5, 58.5]:
+			var u: float = -zc * sx
+			bx(f, u, 7, 0.02, 1.6, 6.0, 0.06, mats.church_glass, false, false)
+			b.tri(f, Vector3(u - 0.8, 10, 0.05), Vector3(u + 0.8, 10, 0.05), Vector3(u, 11.6, 0.05), mats.church_glass, Vector3.BACK, 1.0, false)
+			bx(f, u, 7, 0.06, 0.08, 6.0, 0.06, mats.palestone, false, false)
+		for zc in [36.0, 41.0, 46.0, 51.0, 56.0, 60.6]:
+			var u: float = -zc * sx
+			bx(f, u, 5, 0.8, 1.2, 10, 1.6, rs, true)
+			bx(f, u, 11, 0.5, 1.0, 2.5, 1.0, rs)
+			b.cylinder(f, Vector3(u, 12.25, 0.5), 0.45, 0.0, 2.2, 4, rs)
+
+
+# ----------------------------------------------------------------------------------------------
+# Parcel Depot at the west end of the Ahornallee
+# ----------------------------------------------------------------------------------------------
+var depot_lights: Array[OmniLight3D] = []
+
+func _warehouse() -> void:
+	var I := Transform3D.IDENTITY
+	var x0: float = WH.x0
+	var x1: float = WH.x1
+	var z0: float = WH.z0
+	var z1: float = WH.z1
+	var H: float = WH.h
+	var door: float = WH.door
+	var cx := (x0 + x1) / 2
+	var cz := (z0 + z1) / 2
+	# Access road with pavements
+	road_rects.append(rect(x1, -EW_HALF, -ew_len, EW_HALF))
+	flat(rect(x1, -EW_HALF, -ew_len, EW_HALF), 0.025, mats.cobble)
+	var walk_len := (-ew_len - WALK) - x1
+	for s in [-1, 1]:
+		_sidewalk(x1 + walk_len / 2, s * (EW_HALF + WALK / 2), walk_len, WALK, 0.245, "z", s * (EW_HALF + 0.11))
+	tree_block.append(rect(x1 - 1, -12.5, -ew_len, 12.5))
+	footprints.append(rect(x0 - 1, z0 - 1, x1 + 4, z1 + 1))
+	paved_rects.append(rect(x0, z0, x1, z1))
+
+	var t := 0.25
+	var wall: Material = mats.corrugated
+	var inner: Material = mats.corr_inner
+	bx(I, cx, 0.03, cz, x1 - x0, 0.06, z1 - z0, mats.depot_floor, false, false)
+	bx(I, x0 + t / 2, H / 2, cz, t, H, z1 - z0, [inner, wall, wall, wall, wall, wall], true)
+	bx(I, cx, H / 2, z0 + t / 2, x1 - x0, H, t, [wall, wall, wall, wall, inner, wall], true)
+	bx(I, cx, H / 2, z1 - t / 2, x1 - x0, H, t, [wall, wall, wall, wall, wall, inner], true)
+	var seg := (z1 - z0) / 2 - door
+	for s in [-1, 1]:
+		bx(I, x1 - t / 2, H / 2, s * (door + seg / 2), t, H, seg, [wall, inner, wall, wall, wall, wall], true)
+	bx(I, x1 - t / 2, (H + 5.5) / 2, 0, t, H - 5.5, door * 2, [wall, inner, wall, wall, wall, wall])
+	bx(I, cx, H + 0.15, cz, x1 - x0 + 1.2, 0.3, z1 - z0 + 1.2, [mats.trim, mats.trim, mats.steel, inner, mats.trim, mats.trim], false, true, 3.0)
+	b.box(I, Vector3(cx, H + 0.15, cz), Vector3(x1 - x0 + 1.2, 0.3, z1 - z0 + 1.2), [null, null, null, inner, null, null], 3.0, false, true)
+	for c in [[x0, z0], [x0, z1], [x1, z0], [x1, z1]]:
+		bx(I, c[0], H / 2, c[1], 0.35, H, 0.35, mats.trim)
+	for s in [-1, 1]:
+		bx(I, x1 + 0.05, 2.75, s * door, 0.35, 5.5, 0.35, mats.trim)
+	bx(I, x1 + 0.05, 5.5, 0, 0.35, 0.35, door * 2 + 0.35, mats.trim)
+	b.cylinder(Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3(x1 - 0.6, 5.95, 0)), Vector3(0, -door, 0), 0.45, 0.45, door * 2, 16, mats.steel)
+	var z := z0 + 5.5
+	while z < z1 - 1:
+		bx(I, cx, H - 0.35, z, x1 - x0 - 0.6, 0.35, 0.2, mats.steel, false, false)
+		for xx in [x0 + 0.4, x1 - 0.4]:
+			bx(I, xx, (H - 0.2) / 2, z, 0.25, H - 0.2, 0.2, mats.steel, false, false)
+		z += 5.5
+	z = z0 + 5.5
+	while z < z1 - 1:
+		for xx in [cx - 6, cx + 6]:
+			bx(I, xx, H - 1.0, z, 0.03, 1.0, 0.03, mats.steel, false, false)
+			b.cylinder(I, Vector3(xx, H - 1.78, z), 0.5, 0.12, 0.35, 12, mats.steel, false, 1.0, false)
+			bx(I, xx, H - 1.78, z, 0.6, 0.04, 0.6, mats.depot_lamp, false, false)
+		z += 11.0
+	for lz in [-9.0, 9.0]:
+		var l := OmniLight3D.new()
+		l.light_color = Color("#fff1d8")
+		l.light_energy = 2.2
+		l.omni_range = 30.0
+		l.position = Vector3(cx, H - 2, lz)
+		add_child(l)
+		depot_lights.append(l)
+	var xw := x0 + 3
+	while xw < x1 - 2:
+		for zw in [z0 - 0.01, z1 + 0.01]:
+			bx(I, xw + 1.5, H - 1.4, zw, 3.0, 0.7, 0.04, mats.depot_lamp, false, false)
+		xw += 5.0
+	# Sign over the door
+	bx(I, x1 + 0.2, 6.5, 0, 0.12, 1.6, 8.5, mats.trim)
+	bx(I, x1 + 0.27, 5.85, 0, 0.02, 0.16, 8.5, color_mat("#f2c230"), false, false)
+	label("PARCEL DEPOT", Transform3D(Basis(Vector3.UP, PI / 2), Vector3(x1 + 0.27, 6.6, 0)), 200, Color.WHITE, 0.0065)
+	# Pallets and the ledger desk
+	var pallet := color_mat("#a9865c")
+	for i in 4:
+		var px := x0 + 3 + i * 1.4
+		for dy in [0.0, 0.15]:
+			bx(I, px, 0.13 + dy, z0 + 1.2, 1.2, 0.14, 1.0, pallet)
+	bx(I, x1 - 2.2, 0.475, door + 3.5, 2.2, 0.95, 0.8, color_mat("#8a6a46"), true)
+	bx(I, x1 - 2.2, 1.15, door + 3.25, 0.5, 0.35, 0.04, color_mat("#111316"), false, false)
+	add_interactable(Vector3(x1 - 2.2, 1.2, door + 3.0), "[E] Check the depot ledger", "ledger", Callable())
+
+
+# ----------------------------------------------------------------------------------------------
+# Small cobbled squares at the block corners (townsquares.js)
+# ----------------------------------------------------------------------------------------------
+func _squares() -> void:
+	var defs := [
+		{"x": 45.0, "z": 0.0, "side": 1, "kind": "fountain", "name": "Gänsebrunnen"},
+		{"x": -45.0, "z": 0.0, "side": -1, "kind": "linden", "name": "Lindenplatz"},
+		{"x": 45.0, "z": 0.0, "side": -1, "kind": "maypole", "name": "Maibaumplatz"},
+		{"x": -45.0, "z": -165.0, "side": 1, "kind": "well", "name": "Brunnenhof"},
+		{"x": 45.0, "z": -165.0, "side": 1, "kind": "column", "name": "Theaterplatz"},
+		{"x": 45.0, "z": 165.0, "side": -1, "kind": "linden", "name": "Kirchgasse"},
+	]
+	var I := Transform3D.IDENTITY
+	for d in defs:
+		var z0: float = d.z + d.side * (EW_HALF + WALK)
+		var z1: float = z0 + d.side * 12
+		var r := rect(d.x - 6.5, minf(z0, z1), d.x + 6.5, maxf(z0, z1))
+		flat(r, 0.035, mats.cobble)
+		small_squares.append(r)
+		paved_rects.append(r)
+		tree_block.append(r.grow(1.0))
+		park_blocked.append(r.grow(1.0))
+		var cx: float = d.x
+		var cz: float = z0 + d.side * 6.6
+		var nm: String = d.name
+		match d.kind:
+			"fountain":
+				b.cylinder(I, Vector3(cx, 0, cz), 2.4, 2.4, 0.6, 24, mats.palestone)
+				b.ellipse_ring(I, cx, cz, 0.0, 0.0, 2.2, 2.2, 0.5, mats.water, 24)
+				b.cylinder(I, Vector3(cx, 0, cz), 0.35, 0.3, 2.4, 10, mats.palestone)
+				b.cylinder(I, Vector3(cx, 2.4, cz), 0.25, 0.0, 0.8, 8, mats.brass)
+				solid_cyl(cx, cz, 2.4, 0.6)
+			"linden":
+				_tree(cx, cz, "linden", 1.3)
+				b.cylinder(I, Vector3(cx, 0, cz), 2.0, 2.0, 0.45, 16, color_mat("#6b5040"), true)
+			"maypole":
+				b.cylinder(I, Vector3(cx, 0, cz), 0.18, 0.12, 18, 8, mats.white)
+				for k in 4:
+					bx(I, cx, 6 + k * 2.5, cz, 1.6, 0.6, 0.05, color_mat(["#2d4a6b", "#6b2a24", "#2f5d3a", "#d4a537"][k]), false, false)
+				b.cylinder(I, Vector3(cx, 15.5, cz), 1.4, 1.4, 0.15, 12, color_mat("#3d5a2a"))
+				solid_cyl(cx, cz, 0.3, 18)
+			"well":
+				b.cylinder(I, Vector3(cx, 0, cz), 1.3, 1.3, 0.9, 16, mats.palestone)
+				b.ellipse_ring(I, cx, cz, 0.0, 0.0, 1.05, 1.05, 0.6, mats.water, 16)
+				for s in [-1, 1]:
+					bx(I, cx + s * 1.15, 1.6, cz, 0.15, 2.4, 0.15, mats.oak)
+				b.cylinder(I, Vector3(cx, 2.7, cz), 1.6, 0.0, 1.0, 4, mats.clay, true, 1.0, true, PI / 4)
+				solid_cyl(cx, cz, 1.3, 0.9)
+			"column":
+				b.cylinder(I, Vector3(cx, 0, cz), 0.75, 0.75, 3.6, 16, color_mat("#3d5a4a"))
+				b.cylinder(I, Vector3(cx, 3.6, cz), 0.85, 0.0, 0.7, 16, color_mat("#3d5a4a"))
+				solid_cyl(cx, cz, 0.75, 3.6)
+		var msg := "%s: one of the six little squares of the old town." % nm
+		add_interactable(Vector3(cx, 1.2, cz), "[E] %s" % nm, "square",
+			func() -> Dictionary: return {"title": nm, "message": msg, "sound": "click"})
+
+
+# ----------------------------------------------------------------------------------------------
+# Stadtpark: paths and ponds
+# ----------------------------------------------------------------------------------------------
+func _park_and_lakes() -> void:
+	var I := Transform3D.IDENTITY
+	flat(rect(-46.5, 67, -43.5, 96.4), 0.03, mats.gravel, 1.0)
+	flat(rect(park.position.x, 79.5, park.end.x, 82.5), 0.032, mats.gravel, 1.0)
+	park_blocked.append(rect(-47.5, 66, -42.5, 97))
+	park_blocked.append(rect(park.position.x, 78.5, park.end.x, 83.5))
+	for l in lakes:
+		var cx: float = l.cx
+		var cz: float = l.cz
+		var rw: float = l.rw
+		var rd: float = l.rd
+		# gravel walk round the pond, sandstone coping, water
+		b.ellipse_ring(I, cx, cz, rw + 1.2, rd + 1.2, rw + 3.6, rd + 3.6, 0.03, mats.gravel, 72)
+		b.ellipse_ring(I, cx, cz, rw, rd, rw + 1.2, rd + 1.2, 0.32, mats.palestone, 72)
+		b.ellipse_wall(I, cx, cz, rw + 1.2, rd + 1.2, 0.0, 0.32, mats.palestone, false, 72)
+		b.ellipse_wall(I, cx, cz, rw, rd, -0.2, 0.32, mats.palestone, true, 72)
+		b.ellipse_ring(I, cx, cz, 0.0, 0.0, rw, rd, 0.1, mats.water, 72)
+		paved_rects.append(rect(cx - rw - 1.2, cz - rd - 1.2, cx + rw + 1.2, cz + rd + 1.2))
+		for k in 14:
+			var a := rng.randf() * TAU
+			var rr := rng.randf_range(0.55, 0.92)
+			var px := cx + cos(a) * rw * rr
+			var pz := cz + sin(a) * rd * rr
+			b.cylinder(I, Vector3(px, 0.11, pz), 0.4, 0.4, 0.01, 10, mats.lily, true, 1.0, false)
+		var nm: String = l.name
+		add_interactable(Vector3(cx, 0.8, cz - rd - 0.8), "[E] %s" % nm, "lake",
+			func() -> Dictionary: return {"title": nm, "message": "Ducks, a pier and reeds come back to the pond in a later version of the Godot port.", "sound": "click"})
+
+
+# ----------------------------------------------------------------------------------------------
+# City wall with round towers and the Nordtor
+# ----------------------------------------------------------------------------------------------
+func _city_wall() -> void:
+	var I := Transform3D.IDENTITY
+	var st: Material = mats.wallstone
+	var T := 2.4
+	var HT := 8.0
+	var F := FENCE
+	var full := F + T
+	# [centre, length, along_x]
+	var runs := [
+		[Vector3(-(full + 6.5) / 2, 0, -F - T / 2), full - 6.5, true],
+		[Vector3((full + 6.5) / 2, 0, -F - T / 2), full - 6.5, true],
+		[Vector3(0, 0, F + T / 2), 2 * full, true],
+		[Vector3(-F - T / 2, 0, 0), 2 * full, false],
+		[Vector3(F + T / 2, 0, 0), 2 * full, false],
+	]
+	for r in runs:
+		var c: Vector3 = r[0]
+		var L: float = r[1]
+		var ax: bool = r[2]
+		var size := Vector3(L, HT, T) if ax else Vector3(T, HT, L)
+		bx(I, c.x, HT / 2, c.z, size.x, size.y, size.z, st, true, true, 1.0)
+		# merlons on the outer edge, walkway parapet inside
+		var out_dir := Vector3(0, 0, signf(c.z)) if ax else Vector3(signf(c.x), 0, 0)
+		var along := Vector3.RIGHT if ax else Vector3.BACK
+		var n := int(L / 2.2)
+		for k in n:
+			var p := c + along * (-L / 2 + 1.1 + k * 2.2) + out_dir * (T / 2 - 0.3)
+			var ms := Vector3(1.2, 1.3, 0.6) if ax else Vector3(0.6, 1.3, 1.2)
+			b.box(I, Vector3(p.x, HT + 0.65, p.z), ms, st, 1.0, true)
+		var ps := Vector3(L, 0.6, 0.4) if ax else Vector3(0.4, 0.6, L)
+		var pc := c - out_dir * (T / 2 - 0.2)
+		b.box(I, Vector3(pc.x, HT + 0.3, pc.z), ps, st, 1.0, true)
+	# Round towers: corners and along each side
+	var towers: Array = []
+	for sx in [-1, 1]:
+		for sz in [-1, 1]:
+			towers.append([sx * (F + 1.2), sz * (F + 1.2), 5.2, 15.0])
+	for p in [-120.0, -60.0, 60.0, 120.0]:
+		towers.append([p, -(F + 1.2), 3.8, 12.5])
+		towers.append([p, F + 1.2, 3.8, 12.5])
+		towers.append([-(F + 1.2), p, 3.8, 12.5])
+		towers.append([F + 1.2, p, 3.8, 12.5])
+	for p in [0.0]:
+		towers.append([p, F + 1.2, 3.8, 12.5])
+		towers.append([-(F + 1.2), p, 3.8, 12.5])
+		towers.append([F + 1.2, p, 3.8, 12.5])
+	for tw in towers:
+		var x: float = tw[0]
+		var z: float = tw[1]
+		var r: float = tw[2]
+		var h: float = tw[3]
+		b.cylinder(I, Vector3(x, 0, z), r * 1.05, r, h, 20, st, false, 1.0)
+		b.cylinder(I, Vector3(x, h, z), r + 0.6, 0.0, r * 1.9, 20, mats.clay, false, 1.0)
+		solid_cyl(x, z, r, h)
+		for k in 3:
+			var a := k * TAU / 3 + 0.4
+			bx(I, x + cos(a) * r * 1.01, h * 0.6, z + sin(a) * r * 1.01, 0.3, 1.0, 0.3, mats.recess, false, false)
+	# Nordtor: gate tower over a pointed archway at the north end of the Ulmenstraße
+	var gz0 := -F - 6.0
+	var gz1 := -F + 3.5
+	var gzc := (gz0 + gz1) / 2
+	var gd := gz1 - gz0
+	var GH := 24.0
+	var stn: Material = mats.palestone
+	for s in [-1, 1]:
+		bx(I, s * 4.5, GH / 2, gzc, 4.0, GH, gd, stn, true)
+	bx(I, 0, (GH + 7.5) / 2, gzc, 5.0, GH - 7.5, gd, stn)
+	for zf in [gz0 - 0.02, gz1 + 0.02]:
+		var o := Vector3(0, 0, -1) if zf < gzc else Vector3(0, 0, 1)
+		b.tri(I, Vector3(-2.5, 6.2, zf), Vector3(2.5, 6.2, zf), Vector3(0, 7.5, zf), mats.recess, o)
+	bx(I, 0, 6.85, gzc, 5.0, 1.3, gd - 0.1, mats.recess, false, false)
+	bx(I, 0, 0.03, gzc, 5.0, 0.04, gd, mats.cobble, false, false)
+	# shut oak gates (the moat and drawbridge come later)
+	bx(I, 0, 3.1, gz0 + 0.6, 5.0, 6.2, 0.3, mats.dark_oak, true)
+	for k in 6:
+		bx(I, 0, 0.6 + k * 1.0, gz0 + 0.42, 5.0, 0.1, 0.05, mats.iron, false, false)
+	add_interactable(Vector3(0, 1.6, gz0 + 1.2), "[E] Try the Nordtor gates", "gate",
+		func() -> Dictionary: return {"title": "Nordtor", "message": "The gates are barred. The moat, the drawbridge and the castle on its crag come in a later version of the Godot port.", "sound": "click"})
+	# spire and corner turrets
+	var ov := 0.5
+	var apex := Vector3(0, GH + 15, gzc)
+	var c4 := [Vector3(-6.5 - ov, GH, gz0 - ov), Vector3(6.5 + ov, GH, gz0 - ov), Vector3(6.5 + ov, GH, gz1 + ov), Vector3(-6.5 - ov, GH, gz1 + ov)]
+	for k in 4:
+		var a: Vector3 = c4[k]
+		var c: Vector3 = c4[(k + 1) % 4]
+		var mid := (a + c) / 2
+		b.tri(I, a, c, apex, mats.slate, Vector3(mid.x, 0, mid.z - gzc).normalized() + Vector3(0, 0.3, 0))
+	for sx in [-1, 1]:
+		for zc in [gz0, gz1]:
+			b.cylinder(I, Vector3(sx * 6.5, GH - 4, zc), 1.0, 1.0, 6.5, 12, stn, false)
+			b.cylinder(I, Vector3(sx * 6.5, GH + 2.5, zc), 1.25, 0.0, 3.2, 12, mats.slate)
+	# clock on the town side
+	var cxf := Transform3D(Basis(), Vector3(0, 17, gz1 + 0.05))
+	b.cylinder(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3.ZERO), Vector3.ZERO, 1.6, 1.6, 0.06, 20, mats.white, true, 1.0, false)
+	b.box(cxf, Vector3(0, 0.45, 0.08), Vector3(0.1, 1.0, 0.03), mats.iron, 1.0, false)
+	b.box(cxf, Vector3(-0.3, 0, 0.09), Vector3(0.7, 0.08, 0.03), mats.iron, 1.0, false)
+
+
+# ----------------------------------------------------------------------------------------------
+# Cast-iron street lanterns
+# ----------------------------------------------------------------------------------------------
+func _street_lights() -> void:
+	var k := 0
+	for s in NS_STREETS:
+		var z := -155.0
+		while z <= 155.0:
+			if absf(z) > 14 and absf(absf(z) - 165) > 14:
+				var side := 1 if k % 2 == 0 else -1
+				_lantern(s.x + side * (NS_HALF + 0.7), z)
+				k += 1
+			z += 26.0
+	for e in EW_STREETS:
+		var x := -80.0
+		while x <= 80.0:
+			if absf(x) > 14 and absf(absf(x) - 90) > 14:
+				var side := 1 if k % 2 == 0 else -1
+				if absf(e.z) > 1:
+					side = -int(signf(e.z))
+				_lantern(x, e.z + side * (EW_HALF + 0.7))
+				k += 1
+			x += 26.0
+
+
+func _lantern(x: float, z: float) -> void:
+	var I := Transform3D.IDENTITY
+	b.cylinder(I, Vector3(x, 0.25, z), 0.12, 0.07, 0.6, 8, mats.iron)
+	b.cylinder(I, Vector3(x, 0.85, z), 0.07, 0.05, 3.4, 8, mats.iron)
+	bx(I, x, 4.45, z, 0.42, 0.55, 0.42, mats.iron, false, true)
+	bx(I, x, 4.45, z, 0.36, 0.5, 0.46, mats.lamp, false, false)
+	bx(I, x, 4.45, z, 0.46, 0.5, 0.36, mats.lamp, false, false)
+	b.cylinder(I, Vector3(x, 4.72, z), 0.34, 0.0, 0.35, 4, mats.iron, false, 1.0, true, PI / 4)
+	solid_cyl(x, z, 0.12, 4.3)
+	lamp_sources.append(Vector3(x, 4.3, z))
+
+
+# ----------------------------------------------------------------------------------------------
+# Trees (collected as instances, drawn as MultiMeshes)
+# ----------------------------------------------------------------------------------------------
+func _tree(x: float, z: float, kind: String, s := 1.0, y0 := 0.0, collide := true) -> void:
+	tree_spots.append(Vector2(x, z))
+	var tint := 0.85 + rng.randf() * 0.3
+	if kind == "pine":
+		var th := 2.2 * s
+		_trunks.append([Transform3D(Basis().scaled(Vector3(0.7 * s, th, 0.7 * s)), Vector3(x, y0 + th / 2, z)), Color(1, 1, 1)])
+		var col := Color("#2f4f2a") * tint
+		var tiers := [[2.6, 4.2, 1.6], [2.0, 3.6, 3.9], [1.35, 3.0, 6.0], [0.7, 2.0, 7.9]]
+		for t in tiers:
+			var r: float = t[0] * s
+			var h: float = t[1] * s
+			_cones.append([Transform3D(Basis().scaled(Vector3(r, h, r)), Vector3(x, y0 + t[2] * s + h / 2, z)), col])
+		if collide:
+			solid_cyl(x, z, 0.3 * s, 3.0)
+		return
+	var trunk_h := 4.4 * s
+	_trunks.append([Transform3D(Basis().scaled(Vector3(s, trunk_h, s)), Vector3(x, y0 + trunk_h / 2, z)), Color(1, 1, 1)])
+	var base := Color("#4f7a2e") if kind == "linden" else Color("#e6a3c0")
+	if kind == "oak":
+		base = Color("#44692a")
+	var cy := y0 + 6.4 * s
+	_crowns.append([Transform3D(Basis().scaled(Vector3(3.3, 2.9, 3.3) * s), Vector3(x, cy, z)), base * tint])
+	for k in 5:
+		var a := rng.randf() * TAU
+		var d := rng.randf_range(1.4, 2.4) * s
+		var sc := rng.randf_range(1.6, 2.2) * s
+		var lobe := Vector3(x + cos(a) * d, cy + rng.randf_range(-1.2, 1.6) * s, z + sin(a) * d)
+		_crowns.append([Transform3D(Basis().scaled(Vector3(sc, sc * 0.85, sc)), lobe), base * (tint * rng.randf_range(0.85, 1.1))])
+	if collide:
+		solid_cyl(x, z, 0.32 * s, 4.0)
+
+
+func _near_tree(x: float, z: float, d: float) -> bool:
+	for p in tree_spots:
+		if absf(p.x - x) < d and absf(p.y - z) < d and p.distance_to(Vector2(x, z)) < d:
+			return true
+	return false
+
+
+func _near(list: Array, x: float, z: float, d: float) -> bool:
+	for p in list:
+		if p.distance_to(Vector2(x, z)) < d:
+			return true
+	return false
+
+
+## Linden avenues on the verges between the pavements and the front gardens
+func _avenue_trees() -> void:
+	var off := WALK + 2.1
+	var k := 0
+	for s in NS_STREETS:
+		for side in [-1, 1]:
+			var z := -ns_len + 4
+			while z < ns_len - 4:
+				if absf(z) > EW_HALF + WALK + 3 and absf(absf(z) - 165) > EW_HALF + WALK + 3:
+					_plant(s.x + side * (NS_HALF + off), z, k)
+					k += 1
+				z += 9.5
+	for e in EW_STREETS:
+		for side in [-1, 1]:
+			if absf(e.z) > 1 and signf(side) == signf(e.z):
+				continue
+			var x := -ew_len + 4
+			while x < ew_len - 4:
+				if absf(x) > NS_HALF + WALK + 3 and absf(absf(x) - 90) > NS_HALF + WALK + 3:
+					_plant(x, e.z + side * (EW_HALF + off), k)
+					k += 1
+				x += 9.5
+
+
+func _plant(x: float, z: float, k: int) -> void:
+	if in_rect(park, x, z, 1.0) or not is_clear(x, z, 1.4):
+		return
+	if _near(gate_spots, x, z, 2.4) or _near_tree(x, z, 6.0):
+		return
+	var blossom := hash01(int(round(x)), int(round(z)) + 7) < 0.18
+	_tree(x, z, "flowering" if blossom else "linden", 1.25 if blossom else 1.15 + hash01(k, 3) * 0.3)
+
+
+## Park trees, back-garden trees, and the forest on the foothills outside the wall
+func _scatter_trees() -> void:
+	var n := 0
+	var tries := 0
+	while n < 70 and tries < 2000:
+		tries += 1
+		var x := rng.randf_range(park.position.x + 2, park.end.x - 2)
+		var z := rng.randf_range(park.position.y + 2, park.end.y - 2)
+		if not is_clear(x, z, 1.5) or _near_tree(x, z, 7.0):
+			continue
+		_tree(x, z, "pine" if rng.randf() < 0.3 else ("oak" if rng.randf() < 0.5 else "linden"), rng.randf_range(0.9, 1.35))
+		n += 1
+	n = 0
+	tries = 0
+	while n < 140 and tries < 4000:
+		tries += 1
+		var x := rng.randf_range(-FENCE + 4, FENCE - 4)
+		var z := rng.randf_range(-FENCE + 4, FENCE - 4)
+		if in_rect(park, x, z, 2.0) or not is_clear(x, z, 2.0) or is_on_road(x, z, WALK + 2.5) or _near_tree(x, z, 8.0):
+			continue
+		_tree(x, z, "pine" if rng.randf() < 0.35 else "oak", rng.randf_range(0.85, 1.3))
+		n += 1
+
+
+func _commit_trees() -> void:
+	var trunk := CylinderMesh.new()
+	trunk.top_radius = 0.2
+	trunk.bottom_radius = 0.32
+	trunk.height = 1.0
+	trunk.radial_segments = 7
+	trunk.rings = 1
+	trunk.cap_top = false
+	trunk.cap_bottom = false
+	_multimesh(trunk, _trunks, mats.bark, false)
+	var crown := SphereMesh.new()
+	crown.radius = 1.0
+	crown.height = 2.0
+	crown.radial_segments = 10
+	crown.rings = 6
+	var fol := _shader_mat("res://shaders/foliage.gdshader", {"sway": 0.035})
+	_multimesh(crown, _crowns, fol, true)
+	var cone := CylinderMesh.new()
+	cone.top_radius = 0.0
+	cone.bottom_radius = 1.0
+	cone.height = 1.0
+	cone.radial_segments = 9
+	cone.rings = 1
+	cone.cap_top = false
+	_multimesh(cone, _cones, _shader_mat("res://shaders/foliage.gdshader", {"sway": 0.02}), true)
+
+
+func _multimesh(mesh: Mesh, list: Array, mat: Material, colors: bool) -> void:
+	if list.is_empty():
+		return
+	var mm := MultiMesh.new()
+	mm.transform_format = MultiMesh.TRANSFORM_3D
+	mm.use_colors = colors
+	mm.mesh = mesh
+	mm.instance_count = list.size()
+	for i in list.size():
+		mm.set_instance_transform(i, list[i][0])
+		if colors:
+			mm.set_instance_color(i, list[i][1])
+	var mi := MultiMeshInstance3D.new()
+	mi.multimesh = mm
+	mi.material_override = mat
+	add_child(mi)
+
+
+# ----------------------------------------------------------------------------------------------
+# Mountains round the valley (port of mountainHeight in world.js) with forested foothills
+# ----------------------------------------------------------------------------------------------
+static func _hash2(x: int, y: int) -> float:
+	var h := (x * 374761393 + y * 668265263) & 0xffffffff
+	h = ((h ^ (h >> 13)) * 1274126177) & 0xffffffff
+	return float((h ^ (h >> 16)) & 0xffff) / 65535.0
+
+
+static func _vnoise(x: float, y: float) -> float:
+	var xi := floori(x)
+	var yi := floori(y)
+	var xf := x - xi
+	var yf := y - yi
+	var u := xf * xf * (3 - 2 * xf)
+	var v := yf * yf * (3 - 2 * yf)
+	var a := _hash2(xi, yi)
+	var bb := _hash2(xi + 1, yi)
+	var c := _hash2(xi, yi + 1)
+	var d := _hash2(xi + 1, yi + 1)
+	return a + (bb - a) * u + (c - a) * v + (a - bb - c + d) * u * v
+
+
+static func _ridged(x: float, y: float, oct: int) -> float:
+	var sum := 0.0
+	var amp := 0.5
+	var f := 1.0
+	var w := 1.0
+	for i in oct:
+		var n := 1.0 - absf(_vnoise(x * f, y * f) * 2 - 1)
+		n = n * n * w
+		w = minf(1.0, n * 2)
+		sum += n * amp
+		f *= 2.03
+		amp *= 0.5
+	return sum
+
+
+static func mountain_height(x: float, z: float) -> float:
+	var r := sqrt(x * x + z * z)
+	var r0 := 245.0
+	var rise := smoothstep(r0, r0 + 330, r)
+	var ridge := _ridged(x * 0.0042 + 11.3, z * 0.0042 - 4.1, 5)
+	var broad := _vnoise(x * 0.0016 + 3.7, z * 0.0016 + 9.2)
+	var h := rise * (20 + ridge * 170 * (0.5 + broad * 0.9))
+	h += smoothstep(r0, r0 + 60, r) * (1 - rise) * 22 * _vnoise(x * 0.02, z * 0.02)
+	var dx := x - 60
+	var dz := z + 980
+	h += 470 * exp(-(dx * dx + dz * dz) / (2 * 230 * 230)) * (0.75 + 0.35 * ridge)
+	h *= smoothstep(214, 252, maxf(absf(x), absf(z)))
+	return h - 0.6
+
+
+func _mountains() -> void:
+	var NA := 288
+	var NR := 70
+	var r_in := 205.0
+	var r_out := 1700.0
+	var pts := PackedVector3Array()
+	pts.resize(NA * NR)
+	for j in NR:
+		var r := r_in * pow(r_out / r_in, float(j) / (NR - 1))
+		for i in NA:
+			var a := TAU * i / NA
+			var x := cos(a) * r
+			var z := sin(a) * r
+			pts[j * NA + i] = Vector3(x, mountain_height(x, z), z)
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var normals := PackedVector3Array()
+	normals.resize(NA * NR)
+	for j in NR:
+		for i in NA:
+			var pa := pts[j * NA + (i + 1) % NA] - pts[j * NA + (i + NA - 1) % NA]
+			var pr := pts[mini(j + 1, NR - 1) * NA + i] - pts[maxi(j - 1, 0) * NA + i]
+			var n := pr.cross(pa).normalized()
+			if n.y < 0:
+				n = -n
+			normals[j * NA + i] = n
+	for j in NR - 1:
+		for i in NA:
+			var i1 := (i + 1) % NA
+			var q := [j * NA + i, j * NA + i1, (j + 1) * NA + i1, (j + 1) * NA + i]
+			var A: Vector3 = pts[q[0]]
+			var B: Vector3 = pts[q[1]]
+			var C: Vector3 = pts[q[2]]
+			var fn := (B - A).cross(C - A)
+			var order := [0, 2, 1, 0, 3, 2] if fn.y > 0 else [0, 1, 2, 0, 2, 3]
+			for o in order:
+				st.set_normal(normals[q[o]])
+				st.add_vertex(pts[q[o]])
+	var mesh := st.commit()
+	var mi := MeshInstance3D.new()
+	mi.mesh = mesh
+	mi.material_override = _shader_mat("res://shaders/mountain.gdshader")
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	add_child(mi)
+	# Forest on the foothills and lower slopes
+	var placed := 0
+	var tries := 0
+	while placed < 2600 and tries < 9000:
+		tries += 1
+		var a := rng.randf() * TAU
+		var r := rng.randf_range(232.0, 760.0)
+		var x := cos(a) * r
+		var z := sin(a) * r
+		if maxf(absf(x), absf(z)) < 222:
+			continue
+		var h := mountain_height(x, z)
+		if h > 150 or h < 0.0:
+			continue
+		var slope := absf(mountain_height(x + 4, z) - h) + absf(mountain_height(x, z + 4) - h)
+		if slope > 5.0:
+			continue
+		var s := rng.randf_range(1.3, 2.6) * (1.0 + r / 600.0)
+		_tree(x, z, "pine", s, h - 0.3, false)
+		placed += 1
