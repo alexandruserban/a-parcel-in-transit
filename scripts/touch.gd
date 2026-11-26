@@ -83,7 +83,9 @@ func _press(action: String) -> void:
 	var p = game.player
 	match action:
 		"use": game.interact()
-		"jump": p.jump()
+		"jump":
+			if not game.truck.driving:
+				p.jump()
 		"crouch": p.toggle_crouch()
 		"light": p.toggle_flashlight()
 		"drop": game.drop_one()

@@ -11,6 +11,7 @@ const Sfx := preload("res://scripts/sfx.gd")
 const Touch := preload("res://scripts/touch.gd")
 const Birds := preload("res://scripts/birds.gd")
 const Ducks := preload("res://scripts/ducks.gd")
+const Truck := preload("res://scripts/truck.gd")
 
 const BACKPACK_CAP := 10
 const LAMP_POOL := 14
@@ -33,6 +34,7 @@ var mobile := false
 var touch
 var birds
 var ducks
+var truck
 
 
 func _ready() -> void:
@@ -77,6 +79,10 @@ func _ready() -> void:
 	player.mobile = mobile
 	add_child(player)
 	player.global_position = Vector3(0, 0.1, 0)
+	truck = Truck.new()
+	truck.game = self
+	truck.world = world
+	add_child(truck)
 
 	for i in LAMP_POOL:
 		var l := OmniLight3D.new()
@@ -103,6 +109,9 @@ func _ready() -> void:
 	# Headless / CI smoke run and screenshot mode
 	if "--smoke" in OS.get_cmdline_user_args():
 		_smoke_test()
+		return
+	if "--drive" in OS.get_cmdline_user_args():
+		_drive_test()
 		return
 	if "--shot" in OS.get_cmdline_user_args():
 		_screenshot_mode()
@@ -165,9 +174,16 @@ func _unhandled_input(event: InputEvent) -> void:
 		KEY_E, KEY_ENTER:
 			interact()
 		KEY_SPACE:
-			player.jump()
+			if not truck.driving:
+				player.jump()
 		KEY_C, KEY_CTRL:
-			player.toggle_crouch()
+			if not truck.driving:
+				player.toggle_crouch()
+		KEY_Q:
+			if truck.driving:
+				truck.horn()
+		KEY_V:
+			truck.toggle_view()
 		KEY_F:
 			player.toggle_flashlight()
 		KEY_G:
@@ -198,6 +214,9 @@ func deposit_prompt() -> String:
 
 
 func _update_prompt() -> void:
+	if truck.driving:
+		hud.set_prompt(truck.drive_text())
+		return
 	var cur = player.current
 	var dep := deposit_prompt()
 	if dep != "" and (cur == null or cur.has("slot")):
@@ -211,6 +230,9 @@ func _update_prompt() -> void:
 
 
 func interact() -> void:
+	if truck.driving:
+		truck.press_e()
+		return
 	var cur = player.current
 	if (cur == null or cur.has("slot")) and deposit_prompt() != "":
 		deposit_all()
@@ -359,6 +381,45 @@ func _smoke_test() -> void:
 	get_tree().quit(0 if parcels.stored_total() == 1 else 1)
 
 
+## Get in the truck, hold W for 3 s (then W+A), screenshot the chase camera, stop and get out
+func _drive_test() -> void:
+	get_tree().paused = false
+	hud.show_menu(false)
+	sky.hour = 15.0
+	await get_tree().create_timer(0.5).timeout
+	var start: Vector2 = truck.pos
+	truck.enter()
+	var ev := InputEventKey.new()
+	ev.physical_keycode = KEY_W
+	ev.pressed = true
+	Input.parse_input_event(ev)
+	await get_tree().create_timer(3.0).timeout
+	var evl := InputEventKey.new()
+	evl.physical_keycode = KEY_A
+	evl.pressed = true
+	Input.parse_input_event(evl)
+	await get_tree().create_timer(1.0).timeout
+	var img := get_viewport().get_texture().get_image()
+	var args := OS.get_cmdline_user_args()
+	img.save_png(args[args.find("--drive") + 1].path_join("shot_driving.png"))
+	ev.pressed = false
+	Input.parse_input_event(ev)
+	evl.pressed = false
+	Input.parse_input_event(evl)
+	var sp := InputEventKey.new()
+	sp.physical_keycode = KEY_SPACE
+	sp.pressed = true
+	Input.parse_input_event(sp)
+	await get_tree().create_timer(2.0).timeout
+	sp.pressed = false
+	Input.parse_input_event(sp)
+	print("DRIVE: moved %.1f m, heading %.2f, speed %.2f" % [truck.pos.distance_to(start), truck.heading, truck.speed])
+	truck.exit()
+	await get_tree().physics_frame
+	print("DRIVE: driving=%s player at %s" % [truck.driving, player.global_position])
+	get_tree().quit()
+
+
 var _shots := []
 func _screenshot_mode() -> void:
 	get_tree().paused = false
@@ -375,6 +436,8 @@ func _screenshot_mode() -> void:
 		[Vector3(0, 0.1, 30), "moon", 0.0, 23.0, "moon", 12.0],
 		[Vector3(0, 0.1, 60), 0.6, 0.55, 11.0, "birds", 40.0],
 		[Vector3(-45, 0.1, 130), 0.0, -0.3, 10.0, "ducks", 40.0],
+		[Vector3(-15, 0.1, 9), 0.99, -0.12, 15.0, "truck", 60.0],
+		[Vector3(-31, 0.1, -5), -2.3, -0.12, 15.0, "truck_rear", 60.0],
 		[Vector3(-45, 0.1, 130), "duck", 0, 10.0, "drake", 20.0],
 		[Vector3(-45, 0.1, 130), "duck", 1, 10.0, "hen", 20.0],
 		[Vector3(0, 0.1, 30), "moon", 0.0, 23.0, "moonwide", 75.0],
@@ -393,11 +456,11 @@ func _screenshot_mode() -> void:
 			player.pitch = s[2]
 		for i in 40:
 			await get_tree().process_frame
-			if s[1] == "moon":   # aim at the moon (zoomed in so the face shows)
+			if s[1] is String and s[1] == "moon":   # aim at the moon (zoomed in so the face shows)
 				var d: Vector3 = sky.moon_dir
 				player.yaw = atan2(-d.x, -d.z)
 				player.pitch = asin(d.y)
-			elif s[1] == "duck":   # stand by the pond edge nearest a drake and look at it
+			elif s[1] is String and s[1] == "duck":   # stand by the pond edge nearest a drake and look at it
 				var dd: Dictionary = ducks.lakes[0].sim[s[2]]
 				var dk: Node3D = dd.g
 				var side := Vector3(-sin(dd.heading), 0, cos(dd.heading))   # profile view, from just above the water
