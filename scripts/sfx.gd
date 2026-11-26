@@ -99,8 +99,41 @@ func play(name: String, db := 0.0, pitch := 1.0) -> void:
 
 
 func footstep(surface: String, sprint := false) -> void:
-	var name := "step_grass" if surface == "grass" else "step_hard"
-	play(name, -8.0 if sprint else -11.0, rng.randf_range(0.88, 1.12))
+	if surface == "grass":
+		play("step_grass", -8.0 if sprint else -11.0, rng.randf_range(0.88, 1.12))
+	else:   # pavement, cobbles, floors: a soft tap
+		play("step_hard", -13.0 if sprint else -16.0, rng.randf_range(0.9, 1.1))
+
+
+## Rushing wind gust (playWindGust): the wind loop through its own player, swelling and fading over `duration`
+var gust_player: AudioStreamPlayer
+var _gust_t := -1.0
+var _gust_len := 10.0
+func wind_gust(duration: float) -> void:
+	if not enabled:
+		return
+	if gust_player == null:
+		gust_player = AudioStreamPlayer.new()
+		gust_player.stream = streams.wind
+		add_child(gust_player)
+	_gust_t = 0.0
+	_gust_len = duration
+	gust_player.volume_db = -60.0
+	gust_player.play()
+
+
+func _update_gust(delta: float) -> void:
+	if _gust_t < 0.0 or gust_player == null:
+		return
+	_gust_t += delta
+	var t := _gust_t / _gust_len
+	if t >= 1.0:
+		gust_player.stop()
+		_gust_t = -1.0
+		return
+	var env := t / 0.2 if t < 0.2 else (1.0 if t < 0.55 else 1.0 - (t - 0.55) / 0.45)
+	gust_player.volume_db = linear_to_db(maxf(env * 1.3, 0.001))
+	gust_player.pitch_scale = 1.0 + 1.4 * (t / 0.3 if t < 0.3 else maxf(0.0, 1.0 - (t - 0.3) / 0.7) * 0.8 + 0.2)
 
 
 ## Mallard quack, louder the nearer the pond (volume 0..1, like playQuack)
@@ -111,14 +144,16 @@ func quack(volume: float) -> void:
 
 ## Diesel engine loop for the truck: pitch and loudness follow speed / throttle (startEngine / setEngine)
 func start_engine() -> void:
-	_engine_target = 0.09
+	_engine_target = 0.015
+	_engine_pitch = 0.55
 	if enabled and not engine.playing:
 		engine.play()
 
 
 func set_engine(speed01: float, throttle: bool) -> void:
-	_engine_pitch = 1.0 + speed01 * 1.6 + (0.25 if throttle else 0.0)
-	_engine_target = 0.07 + speed01 * 0.06 + (0.03 if throttle else 0.0)
+	# an electric motor is nearly silent at a standstill and its whine climbs steeply with speed
+	_engine_pitch = 0.55 + speed01 * 2.6 + (0.08 if throttle else 0.0)
+	_engine_target = 0.015 + speed01 * 0.08 + (0.025 if throttle else 0.0)
 
 
 func stop_engine() -> void:
@@ -126,6 +161,7 @@ func stop_engine() -> void:
 
 
 func _process(delta: float) -> void:
+	_update_gust(delta)
 	_engine_vol = move_toward(_engine_vol, _engine_target if enabled else 0.0, delta * 0.4)
 	if engine.playing:
 		engine.pitch_scale = lerpf(engine.pitch_scale, _engine_pitch, minf(1.0, delta * 6.0))
@@ -225,7 +261,14 @@ static func _saw(ph: float) -> float:
 
 func _build() -> void:
 	rng.seed = 99
-	streams.step_hard = _wav(_noise_burst(0.09, 45.0, 0.35, 1.4, 0.35, 95.0))
+	var tap := _buf(0.09)
+	var tph := 0.0
+	for i in tap.size():
+		var t := float(i) / RATE
+		tph += (260.0 * pow(80.0 / 260.0, minf(t / 0.07, 1.0))) / RATE
+		var tri_w := 4.0 * absf(tph - floorf(tph + 0.5)) - 1.0
+		tap[i] = (tri_w * 0.55 + (rng.randf() * 2.0 - 1.0) * 0.06) * exp(-t * 55.0) * minf(1.0, t * 800.0)
+	streams.step_hard = _wav(_biquad(tap, "low", 1400.0, 0.707))
 	streams.step_grass = _wav(_noise_burst(0.14, 26.0, 0.12, 1.6, 0.15, 70.0))
 	streams.jump = _wav(_noise_burst(0.16, 18.0, 0.08, 1.2))
 	streams.land = _wav(_noise_burst(0.2, 22.0, 0.1, 1.2, 0.6, 65.0))
@@ -318,9 +361,18 @@ func _build() -> void:
 			var env := minf(t / 0.03, 1.0) * (1.0 if t < 0.45 else exp(-(t - 0.45) * 40.0))
 			horn[i] += (0.16 if fmod(t * f, 1.0) < 0.5 else -0.16) * env
 	streams.horn = _wav(horn)
-	# Engine: two detuned saws and a square an octave up, low-passed; 10 s so all three loop seamlessly
-	var eng := _buf(10.0)
+	# Electric drive: the motor's tonal whine (fundamental, harmonics and the inverter's high note) over a soft
+	# low-passed rush of tyres and air. 2 s, all whole-hertz tones, so the loop is seamless.
+	var eng := _buf(2.0)
+	var rush := 0.0
 	for i in eng.size():
 		var t := float(i) / RATE
-		eng[i] = 0.5 * _saw(38.0 * t) + 0.5 * _saw(38.7 * t) + 0.25 * (1.0 if fmod(76.5 * t, 1.0) < 0.5 else -1.0)
-	streams.engine = _wav(_amp(_biquad(eng, "low", 420.0, 0.707), 0.5), true)
+		rush += 0.04 * ((rng.randf() * 2.0 - 1.0) - rush)
+		eng[i] = 0.42 * sin(TAU * 150.0 * t) + 0.22 * sin(TAU * 300.0 * t) + 0.08 * sin(TAU * 450.0 * t) \
+			+ 0.05 * sin(TAU * 1200.0 * t) + 0.025 * sin(TAU * 2400.0 * t) + rush * 0.9
+	var efade := int(0.2 * RATE)
+	for i in efade:   # cross-fade the noise seam
+		var k := float(i) / efade
+		eng[i] = eng[i] * k + eng[eng.size() - efade + i] * (1.0 - k)
+	eng.resize(eng.size() - efade)
+	streams.engine = _wav(_amp(eng, 0.6), true)

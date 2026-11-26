@@ -149,12 +149,86 @@ func prompt_for(rec: Dictionary) -> String:
 	return "[E] Pick up %s" % String(SIZES[rec.size].name).to_lower()
 
 
+# ------------------------------------------------------------------------------------------------
+# Wind gusts (world.js startGust / updateWind): every loose parcel is lifted, swirled along the gust and
+# dropped somewhere new. Anything filed in the depot is safe.
+# ------------------------------------------------------------------------------------------------
+var flights: Array = []
+
+
+func _landing_spot(range_m := 140.0) -> Vector2:
+	for t in 40:
+		var x := rng.randf_range(-range_m, range_m)
+		var z := rng.randf_range(-range_m, range_m)
+		if world.house_at(x, z) or world.in_warehouse(x, z, 2.0):
+			continue
+		if _free_spot(x, z, 0.6):
+			return Vector2(x, z)
+	return Vector2(rng.randf_range(-10, 10), 20 + rng.randf() * 30)
+
+
+func start_gust() -> int:
+	flights.clear()
+	for rec in records:
+		if rec.stored:
+			continue
+		var to := _landing_spot()
+		rec.flying = true
+		flights.append({"rec": rec, "from": rec.pos, "to": Vector3(to.x, 0, to.y), "delay": rng.randf() * 1.6,
+			"dur": 4.0 + rng.randf() * 3.0, "apex": 12.0 + rng.randf() * 8.0,
+			"swirl": (-1.0 if rng.randf() < 0.5 else 1.0) * (2.0 + rng.randf() * 4.0),
+			"spin": Vector3(rng.randf() - 0.5, rng.randf() - 0.5, rng.randf() - 0.5) * 9.0, "basis": Basis(Vector3.UP, rec.rot)})
+	return flights.size()
+
+
+## gust_t: seconds since the gust began; gust: its strength 0..1
+func update_gust(gust_t: float, gust: float, dt: float) -> void:
+	if flights.is_empty():
+		return
+	var done := 0
+	for f in flights:
+		var rec: Dictionary = f.rec
+		if not rec.live:
+			done += 1
+			continue
+		var h: float = SIZES[rec.size].h
+		var t: float = (gust_t - f.delay) / f.dur
+		if t <= 0.0:   # rattling before lift-off
+			_mm[rec.size].set_instance_transform(rec.slot, Transform3D(Basis(Vector3.UP, rec.rot) * Basis(Vector3.BACK, sin(gust_t * 20.0) * 0.05 * gust), rec.pos))
+			continue
+		if t >= 1.0:
+			if rec.flying:
+				var to: Vector3 = f.to
+				rec.rot = rng.randf() * PI
+				rec.pos = Vector3(to.x, world.ground_y_at(to.x, to.z) + h / 2 + 0.01, to.z)
+				var S: Dictionary = SIZES[rec.size]
+				rec.hx = maxf(S.w, S.d) * 0.45
+				rec.hz = rec.hx
+				rec.flying = false
+				_mm[rec.size].set_instance_transform(rec.slot, Transform3D(Basis(Vector3.UP, rec.rot), rec.pos))
+			done += 1
+			continue
+		var e := t * t * (3.0 - 2.0 * t)
+		var from: Vector3 = f.from
+		var to2: Vector3 = f.to
+		var p := from.lerp(Vector3(to2.x, from.y, to2.z), e)
+		var path := Vector3(to2.x - from.x, 0, to2.z - from.z).normalized()
+		p += Vector3(-path.z, 0, path.x) * sin(t * TAU) * f.swirl * (1.0 - t)
+		p.y = h / 2 + f.apex * 4.0 * t * (1.0 - t) + sin(t * 17.0) * 0.4 * (1.0 - t)
+		var sp: Vector3 = f.spin * dt
+		f.basis = (f.basis * Basis.from_euler(sp)).orthonormalized()
+		rec.pos = p
+		_mm[rec.size].set_instance_transform(rec.slot, Transform3D(f.basis, p))
+	if done == flights.size():
+		flights.clear()
+
+
 ## Nearest pick-up-able parcel in the view cone (same test as updateInteractions in player.js)
 func nearest(eye: Vector3, dir: Vector3, max_dist: float):
 	var best = null
 	var best_d := max_dist
 	for rec in records:
-		if rec.stored:
+		if rec.stored or rec.get("flying", false):
 			continue
 		var p: Vector3 = rec.pos
 		if absf(p.x - eye.x) > best_d or absf(p.z - eye.z) > best_d:

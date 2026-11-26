@@ -465,6 +465,15 @@ func random_spot(range_m: float) -> Vector2:
 	return Vector2(0, 3)
 
 
+## Breeze and gusts bend the trees (the wind uniforms of the foliage and bark shaders)
+func set_wind(strength: float, dir: Vector2) -> void:
+	var mats_: Array = trees.leaf_mats.values()
+	mats_.append(trees.bark_mat)
+	for m in mats_:
+		m.set_shader_parameter("wind", strength)
+		m.set_shader_parameter("wind_dir", dir)
+
+
 func set_night(on: bool) -> void:
 	house_parts.set_night(on)
 	for g in night_glows:

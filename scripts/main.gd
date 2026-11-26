@@ -36,6 +36,9 @@ var birds
 var ducks
 var truck
 var room_lights: Array[OmniLight3D] = []
+# Wind: a steady breeze plus a gust every couple of minutes that scatters the loose parcels (world.js initWind)
+var wind := {"dir": Vector2(1, 0.3).normalized(), "strength": 0.25, "gust": 0.0, "active": false, "t": 0.0, "dur": 10.0, "next": 50.0, "time": 0.0}
+var leaves: CPUParticles3D
 
 
 func _ready() -> void:
@@ -106,6 +109,9 @@ func _ready() -> void:
 		add_child(rl)
 		room_lights.append(rl)
 
+	wind.next = 50.0 + randf() * 40.0
+	_make_leaves()
+
 	hud = Hud.new()
 	hud.game = self
 	hud.mobile = mobile
@@ -121,6 +127,9 @@ func _ready() -> void:
 	# Headless / CI smoke run and screenshot mode
 	if "--smoke" in OS.get_cmdline_user_args():
 		_smoke_test()
+		return
+	if "--gust" in OS.get_cmdline_user_args():
+		_gust_test()
 		return
 	if "--stairs" in OS.get_cmdline_user_args():
 		_stairs_test()
@@ -171,6 +180,7 @@ func _process(delta: float) -> void:
 	sky.update(delta, player.global_position)
 	world.set_water_sky(sky.params, sky.sun_dir, sky.moon_dir, sky.moon_amt, sky.daylight(), sky.sun_visibility())
 	birds.update(delta, sky.daylight())
+	_update_wind(delta)
 	ducks.update(delta, player.global_position)
 	var night: bool = sky.is_night()
 	if night != is_night:
@@ -356,6 +366,73 @@ func toggle_weather() -> void:
 	hud.show_dialogue("Clouding over" if overcast else "Clearing up", "Grey skies rolling in: soft, shadowless light." if overcast else "The clouds are breaking up.")
 
 
+## Leaves and dust that blow past only during a gust
+func _make_leaves() -> void:
+	leaves = CPUParticles3D.new()
+	leaves.amount = 160 if mobile else 260
+	leaves.lifetime = 4.5
+	leaves.local_coords = false
+	leaves.emitting = false
+	leaves.emission_shape = CPUParticles3D.EMISSION_SHAPE_BOX
+	leaves.emission_box_extents = Vector3(22, 2, 22)
+	leaves.gravity = Vector3(0, -0.4, 0)
+	leaves.angular_velocity_min = -360.0
+	leaves.angular_velocity_max = 360.0
+	leaves.spread = 25.0
+	leaves.scale_amount_min = 0.6
+	leaves.scale_amount_max = 1.3
+	var q := QuadMesh.new()
+	q.size = Vector2(0.18, 0.1)
+	var m := StandardMaterial3D.new()
+	m.albedo_color = Color("#8a7440")
+	m.billboard_mode = BaseMaterial3D.BILLBOARD_PARTICLES
+	m.cull_mode = BaseMaterial3D.CULL_DISABLED
+	m.roughness = 1.0
+	q.material = m
+	leaves.mesh = q
+	add_child(leaves)
+
+
+func start_gust() -> void:
+	wind.active = true
+	wind.t = 0.0
+	wind.dur = 9.0 + randf() * 4.0
+	var a := randf() * TAU
+	wind.dir = Vector2(cos(a), sin(a))
+	sfx.wind_gust(wind.dur)
+	parcels.start_gust()
+	hud.show_dialogue("Gust of wind!", "A strong gust is sweeping through the town, scattering parcels everywhere. Anything stacked in the depot is safe!")
+
+
+func _update_wind(delta: float) -> void:
+	if not started:
+		return
+	wind.time += delta
+	if not wind.active:
+		wind.next -= delta
+		if wind.next <= 0.0:
+			start_gust()
+	if wind.active:
+		wind.t += delta
+		var t: float = wind.t / wind.dur
+		# quick build-up, long hold, slow fade
+		wind.gust = t / 0.15 if t < 0.15 else (1.0 if t < 0.6 else maxf(0.0, 1.0 - (t - 0.6) / 0.4))
+		if wind.t >= wind.dur + 7.5:   # let the last parcels land
+			wind.active = false
+			wind.next = 70.0 + randf() * 80.0
+	parcels.update_gust(wind.t, wind.gust, delta)
+	wind.strength = 0.18 + 0.1 * sin(wind.time * 0.21) * sin(wind.time * 0.53) + wind.gust * 0.8
+	world.set_wind(wind.strength, wind.dir)
+	# leaves blow past upwind of the player
+	var d: Vector2 = wind.dir
+	var speed: float = 6.0 + wind.gust * 14.0
+	leaves.emitting = wind.gust > 0.05 and not world.house_parts.house_at(player.global_position.x, player.global_position.z)
+	leaves.global_position = player.global_position + Vector3(-d.x * 14.0, 1.5, -d.y * 14.0)
+	leaves.direction = Vector3(d.x, 0.15, d.y)
+	leaves.initial_velocity_min = speed * 0.8
+	leaves.initial_velocity_max = speed * 1.1
+
+
 ## Room lights follow you indoors (brighter at night); ceiling fixtures glow when the lights are on
 func _update_room_lights() -> void:
 	var p: Vector3 = player.global_position
@@ -412,6 +489,40 @@ func _smoke_test() -> void:
 	deposit_all()
 	print("SMOKE: parcels %d -> %d, stored %d, score %d, backpack %d, player y %.2f" % [before, parcels.records.size(), parcels.stored_total(), score, backpack.size(), player.global_position.y])
 	get_tree().quit(0 if parcels.stored_total() == 1 else 1)
+
+
+## Start a gust, screenshot the parcels in the air, check they all land somewhere new
+func _gust_test() -> void:
+	get_tree().paused = false
+	hud.show_menu(false)
+	started = true
+	sky.hour = 12.0
+	player.global_position = Vector3(30, 0.1, 40)
+	player.yaw = 0.6
+	player.pitch = 0.25
+	await get_tree().create_timer(0.5).timeout
+	var loose: Array = []
+	for r in parcels.records:
+		if not r.stored:
+			loose.append([r, r.pos])
+	start_gust()
+	await get_tree().create_timer(4.0).timeout
+	var flying := 0
+	for r in parcels.records:
+		if r.get("flying", false):
+			flying += 1
+	var args := OS.get_cmdline_user_args()
+	get_viewport().get_texture().get_image().save_png(args[args.find("--gust") + 1].path_join("shot_gust.png"))
+	await get_tree().create_timer(16.0).timeout
+	var moved := 0
+	var still := 0
+	for e in loose:
+		if e[0].get("flying", false):
+			still += 1
+		if e[0].pos.distance_to(e[1]) > 1.0:
+			moved += 1
+	print("GUST: %d loose parcels, %d in the air at 4 s, %d moved, %d still flying at 20 s, gust active %s" % [loose.size(), flying, moved, still, wind.active])
+	get_tree().quit()
 
 
 ## Open a front door, walk into the hall and up the stairs (joystick input in house space)
