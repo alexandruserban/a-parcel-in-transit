@@ -20,7 +20,7 @@ A Godot 4.7 port of the Three.js / WebView game in `../tidyup`. It is a first-pe
 
 ## Saving and scoring
 
-The game saves where you left off to `user://save.json` (on Windows `%APPDATA%\Godotpp_userdata\Parcels in Transit\`): your position, the time of day and weather, score, backpack, every parcel's position, what's in the depot, and the truck and its cargo. It saves every 30 seconds, when you pause, when you switch away and when you quit, and picks up there the next time you start. The pause menu shows your progress (time played, parcels in the depot and picked up, distances, gusts, doorbells) and has a New game button.
+The game saves where you left off to `user://save.json` (on Windows `%APPDATA%\Godot\app_userdata\Parcels in Transit\`): your position, the time of day and weather, score, backpack, every parcel's position, what's in the depot, and the truck and its cargo. It saves every 30 seconds, when you pause, when you switch away and when you quit, and picks up there the next time you start. The pause menu shows your progress (time played, parcels in the depot and picked up, distances, gusts, doorbells) and has a New game button.
 
 You score 50 points for every parcel filed in the depot (carried in, or unloaded from the truck), and 50 for the first ring at each house's doorbell. Picking up and putting down parcels scores nothing, and filed parcels stay in the depot.
 
