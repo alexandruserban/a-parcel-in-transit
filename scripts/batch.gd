@@ -27,29 +27,31 @@ static func _v(st: SurfaceTool, p: Vector3, n: Vector3, uv: Vector2) -> void:
 
 
 ## Quad a-b-c-d (a loop, either winding). `out` (local space) is the side it should face.
+## UVs are in metres: u runs a->b, v runs a->d (negated, so the top of the image points from a towards d).
 func quad(xf: Transform3D, a: Vector3, b: Vector3, c: Vector3, d: Vector3, mat: Material,
 		out := Vector3.ZERO, uv_scale := 1.0, shadow := true) -> void:
 	var A := xf * a
 	var B := xf * b
 	var C := xf * c
 	var D := xf * d
-	var n := (B - A).cross(C - A)
-	if out != Vector3.ZERO and n.dot(xf.basis * out) < 0.0:
-		var t := B
-		B = D
-		D = t
-		n = -n
-	n = n.normalized()
 	var tu := (B - A).normalized()
 	var tv := ((D - A) - tu * (D - A).dot(tu)).normalized()
 	var ua := Vector2.ZERO
-	var ub := Vector2((B - A).dot(tu), (B - A).dot(tv)) / uv_scale
-	var uc := Vector2((C - A).dot(tu), (C - A).dot(tv)) / uv_scale
-	var ud := Vector2((D - A).dot(tu), (D - A).dot(tv)) / uv_scale
+	var ub := Vector2((B - A).dot(tu), -(B - A).dot(tv)) / uv_scale
+	var uc := Vector2((C - A).dot(tu), -(C - A).dot(tv)) / uv_scale
+	var ud := Vector2((D - A).dot(tu), -(D - A).dot(tv)) / uv_scale
+	var n := (B - A).cross(C - A)
+	var flip := out != Vector3.ZERO and n.dot(xf.basis * out) < 0.0
+	if flip:
+		n = -n
+	n = n.normalized()
 	var st := _tool(mat, (A + C) * 0.5, shadow)
-	# A,B,C,D is counter-clockwise seen from n: emit clockwise
-	_v(st, A, n, ua); _v(st, C, n, uc); _v(st, B, n, ub)
-	_v(st, A, n, ua); _v(st, D, n, ud); _v(st, C, n, uc)
+	if not flip:   # A,B,C,D is counter-clockwise seen from n: emit clockwise
+		_v(st, A, n, ua); _v(st, C, n, uc); _v(st, B, n, ub)
+		_v(st, A, n, ua); _v(st, D, n, ud); _v(st, C, n, uc)
+	else:
+		_v(st, A, n, ua); _v(st, B, n, ub); _v(st, C, n, uc)
+		_v(st, A, n, ua); _v(st, C, n, uc); _v(st, D, n, ud)
 
 
 func tri(xf: Transform3D, a: Vector3, b: Vector3, c: Vector3, mat: Material,
@@ -57,19 +59,20 @@ func tri(xf: Transform3D, a: Vector3, b: Vector3, c: Vector3, mat: Material,
 	var A := xf * a
 	var B := xf * b
 	var C := xf * c
+	var tu := (B - A).normalized()
+	var tv := ((C - A) - tu * (C - A).dot(tu)).normalized()
+	var ub := Vector2((B - A).dot(tu), -(B - A).dot(tv)) / uv_scale
+	var uc := Vector2((C - A).dot(tu), -(C - A).dot(tv)) / uv_scale
 	var n := (B - A).cross(C - A)
-	if out != Vector3.ZERO and n.dot(xf.basis * out) < 0.0:
-		var t := B
-		B = C
-		C = t
+	var flip := out != Vector3.ZERO and n.dot(xf.basis * out) < 0.0
+	if flip:
 		n = -n
 	n = n.normalized()
-	var tu := (B - A).normalized()
-	var tv := n.cross(tu)
 	var st := _tool(mat, (A + B + C) / 3.0, shadow)
-	_v(st, A, n, Vector2.ZERO)
-	_v(st, C, n, Vector2((C - A).dot(tu), (C - A).dot(tv)) / uv_scale)
-	_v(st, B, n, Vector2((B - A).dot(tu), (B - A).dot(tv)) / uv_scale)
+	if not flip:
+		_v(st, A, n, Vector2.ZERO); _v(st, C, n, uc); _v(st, B, n, ub)
+	else:
+		_v(st, A, n, Vector2.ZERO); _v(st, B, n, ub); _v(st, C, n, uc)
 
 
 static func _ext(v: Vector3, h: Vector3) -> float:
@@ -125,7 +128,7 @@ func cylinder(xf: Transform3D, base: Vector3, r0: float, r1: float, h: float, se
 		var n1 := (xf.basis * (d1 + Vector3(0, slope, 0))).normalized()
 		var u0 := circ * i / segs / uv_scale
 		var u1 := circ * (i + 1) / segs / uv_scale
-		var vt := sqrt(h * h + (r0 - r1) * (r0 - r1)) / uv_scale
+		var vt := -sqrt(h * h + (r0 - r1) * (r0 - r1)) / uv_scale
 		var outward := xf.basis * (d0 + d1)
 		var fn := (P1 - P0).cross(P2 - P0)
 		if r1 == 0.0:
@@ -177,6 +180,7 @@ func commit(parent: Node3D) -> int:
 	for key in _tools:
 		var e: Dictionary = _tools[key]
 		var st: SurfaceTool = e["st"]
+		st.generate_tangents()
 		var mesh := st.commit()
 		if mesh == null or mesh.get_surface_count() == 0:
 			continue

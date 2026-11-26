@@ -86,10 +86,13 @@ func build() -> void:
 				columns.append({"x": x, "z": z, "top": g0 + S.h, "foot": foot})
 			specs[size].append([x, y, z, rng.randf() * PI])
 
-	var mat := ShaderMaterial.new()
-	mat.shader = load("res://shaders/cardboard.gdshader")
+	var card: Texture2D = load("res://assets/textures/cardboard_col.png")
 	for size in SIZES:
 		var S: Dictionary = SIZES[size]
+		var mat := ShaderMaterial.new()
+		mat.shader = load("res://shaders/cardboard.gdshader")
+		mat.set_shader_parameter("card_tex", card)
+		mat.set_shader_parameter("box_size", Vector3(S.w, S.h, S.d))
 		var list: Array = specs[size]
 		var mesh := BoxMesh.new()
 		mesh.size = Vector3(S.w, S.h, S.d)

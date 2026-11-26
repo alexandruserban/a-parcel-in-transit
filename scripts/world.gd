@@ -114,66 +114,117 @@ func _glow(color: Color, emission: Color, energy: float, always := false) -> Sta
 
 
 func _make_materials() -> void:
-	mats.grass = _shader_mat("res://shaders/grass.gdshader")
-	mats.cobble = _shader_mat("res://shaders/cobble.gdshader")
-	mats.pavers = _shader_mat("res://shaders/cobble.gdshader", {"scale": 6.0, "jitter": 0.15,
-		"stone_a": Color("#a8968a"), "stone_b": Color("#8a776b"), "joint": Color("#4a4038")})
-	mats.slab = _shader_mat("res://shaders/slab.gdshader")
-	mats.gravel = _shader_mat("res://shaders/cobble.gdshader", {"scale": 22.0, "jitter": 1.0,
-		"stone_a": Color("#c9b99a"), "stone_b": Color("#a8977a"), "joint": Color("#8f8068")})
-	mats.kerb = _std(Color("#9d9b97"), 0.85)
-	mats.palestone = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color("#cfc4ae"), "mode": 1, "block": Vector2(0.7, 0.35)})
-	mats.redstone = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color("#a5604a"), "mode": 1})
-	mats.wallstone = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color("#a89a84"), "mode": 1, "block": Vector2(1.1, 0.5)})
-	mats.oak = _std(Color("#4a3222"), 0.85)
+	# Surfaces use the web game's own textures (tools/export_textures.py), tiled at the same size in metres
+	mats.grass = tmat("grass", Vector2(5, 5), {"rough": 0.95, "macro": 2, "depth": 0.6})
+	mats.cobble = tmat("cobble", Vector2(2, 2), {"rough": 1.0, "macro": 1})
+	mats.pavers = tmat("pavers", Vector2(6.5 / 3.0, 16.6 / 6.0), {"rough": 0.9, "depth": 0.6})
+	mats.slab = tmat("slab", Vector2(1.5, 1.5), {"rough": 1.0, "depth": 0.6})
+	mats.gravel = tmat("gravel", Vector2(2, 2), {"rough": 0.95, "tint": Color("#e6dccb")})
+	mats.kerb = tmat("sett", Vector2(1, 1), {"rough": 0.85, "tint": Color("#d6d4d0"), "depth": 0.4})
+	mats.gutter = tmat("sett", Vector2(1, 1), {"rough": 1.0, "depth": 0.8})
+	mats.sandstone = tmat("ashlar_c9b08a", Vector2(3, 3), {"rough": 0.92, "depth": 0.6})
+	mats.palestone = tmat("ashlar_d6c29b", Vector2(3, 3), {"rough": 0.88, "depth": 0.6})
+	mats.redstone = tmat("ashlar_a8634f", Vector2(3, 3), {"rough": 0.9, "depth": 0.7})
+	mats.wallstone = tmat("ashlar_a89a84", Vector2(3, 3), {"rough": 0.93, "depth": 0.8})
+	mats.slate = tmat("slate", Vector2(1.2, 1.0), {"rough": 0.6, "metal": 0.05, "two_sided": true, "depth": 0.8})
+	mats.clay = roof_mat("#a0492f")
+	mats.copper = tmat("copper", Vector2(2, 2), {"rough": 0.55, "metal": 0.35})
+	mats.oak = wood("#4a2e1a")
+	mats.soffit = timber("#6b4c33")
 	mats.dark_oak = _std(Color("#2f2018"), 0.8)
-	mats.frame = _std(Color("#efebe2"), 0.6)
-	mats.iron = _std(Color("#25272b"), 0.45, 0.6)
-	mats.brass = _std(Color("#d4a537"), 0.25, 0.85)
-	mats.copper = _std(Color("#5c9c84"), 0.55, 0.35)
-	mats.slate = _shader_mat("res://shaders/roof.gdshader", {"albedo": Color("#3e434b"), "tile": Vector2(0.3, 0.22), "variation": 0.15})
-	mats.clay = _shader_mat("res://shaders/roof.gdshader", {"albedo": Color("#9c4a2f")})
-	mats.recess = _std(Color("#2a2522"), 0.95)
-	mats.glass_lit = _glow(Color("#1c2836"), Color("#ffc27a"), 1.6)
-	mats.glass_dark = _std(Color("#1c2836"), 0.08, 0.2)
+	mats.frame = _std(Color("#f1eee8"), 0.55)
+	mats.iron = _std(Color("#1f2a24"), 0.5, 0.6)
+	mats.brass = _std(Color("#d4a537"), 0.25, 0.95)
+	mats.recess = _std(Color("#121214"), 0.95)
+	mats.glass_lit = _glow(Color("#2a343c"), Color("#ffc27a"), 1.6)
+	mats.glass_dark = _std(Color("#2a343c"), 0.15, 0.3)
 	mats.glass_dark.emission_enabled = true
 	mats.glass_dark.emission = Color("#ffc27a")
 	night_glows.append({"mat": mats.glass_dark, "energy": 0.18})
-	mats.church_glass = _glow(Color("#26304a"), Color("#ff9e5a"), 2.2)
+	mats.leaded = tmat("leadedglass", Vector2(0.8, 2.0), {"rough": 0.2, "metal": 0.2, "emission_tint": Color("#ffc27a")})
+	night_glows.append({"mat": mats.leaded, "energy": 1.4})
+	mats.church_glass = []
+	for k in 5:
+		var g := tmat("stainedglass_%d" % k, Vector2(1.6, 6.0), {"rough": 0.2})
+		night_glows.append({"mat": g, "energy": 1.8})
+		mats.church_glass.append(g)
 	mats.lamp = _glow(Color("#f2e6d0"), Color("#ffc98a"), 3.5)
-	mats.hedge_std = _std(Color("#3d5a2a"), 0.95)
+	mats.hedge = tmat("foliage_bush", Vector2(2, 2), {"rough": 0.95, "tint": Color("#8fa77c"), "depth": 0.8})
 	mats.water = _shader_mat("res://shaders/water.gdshader")
 	mats.lily = _std(Color("#4f7a33"), 0.7)
-	mats.bark = _std(Color("#4a3b2e"), 0.95)
 	mats.steel = _std(Color("#3c4146"), 0.5, 0.7)
-	mats.corrugated = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color("#7d8b93"), "mode": 0})
-	mats.corr_inner = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color("#b9c0c4"), "mode": 0})
+	mats.corrugated = tmat("corrugated_7d8b93", Vector2(2.5, 2.5), {"rough": 0.55, "metal": 0.55})
+	mats.corr_inner = tmat("corrugated_b9c0c4", Vector2(2.5, 2.5), {"rough": 0.7, "metal": 0.3})
 	mats.trim = _std(Color("#2f5d7c"), 0.5, 0.4)
-	mats.depot_floor = _std(Color("#8e8b85"), 0.75)
+	mats.depot_floor = tmat("depotfloor", Vector2(4, 4), {"rough": 0.75})
 	mats.depot_lamp = _glow(Color("#ffffff"), Color("#fff4dc"), 2.0, true)
 	mats.enamel = _std(Color("#1d4f91"), 0.3, 0.1)
 	mats.white = _std(Color("#f4f1ea"), 0.5)
 
 
-var _plaster_cache := {}
+const TEX := "res://assets/textures/%s.png"
+const TEXTURED := preload("res://shaders/textured.gdshader")
+const TEXTURED_2S := preload("res://shaders/textured_2s.gdshader")
+var _tex_cache := {}
+
+func tex(name: String) -> Texture2D:
+	if not _tex_cache.has(name):
+		_tex_cache[name] = load(TEX % name) if ResourceLoader.exists(TEX % name) else null
+	return _tex_cache[name]
+
+
+var _tmat_cache := {}
+## Material from an exported texture set (<name>_col / _nrm / _rgh); tile = metres per texture repeat
+func tmat(name: String, tile: Vector2, o := {}) -> ShaderMaterial:
+	var key := name + str(tile) + str(o)
+	if _tmat_cache.has(key):
+		return _tmat_cache[key]
+	var m := ShaderMaterial.new()
+	m.shader = TEXTURED_2S if o.get("two_sided", false) else TEXTURED
+	m.set_shader_parameter("albedo_tex", tex(name + "_col"))
+	var nrm := tex(o.get("normal", name + "_nrm"))
+	if nrm != null:
+		m.set_shader_parameter("normal_tex", nrm)
+		m.set_shader_parameter("has_normal", true)
+		m.set_shader_parameter("normal_depth", o.get("depth", 1.0))
+	var rgh := tex(name + "_rgh")
+	if rgh != null:
+		m.set_shader_parameter("rough_tex", rgh)
+		m.set_shader_parameter("has_rough", true)
+	m.set_shader_parameter("tile", tile)
+	m.set_shader_parameter("roughness", o.get("rough", 0.9))
+	m.set_shader_parameter("metallic", o.get("metal", 0.0))
+	m.set_shader_parameter("tint", o.get("tint", Color.WHITE))
+	m.set_shader_parameter("emission_tint", o.get("emission_tint", Color.WHITE))
+	if o.has("macro"):
+		m.set_shader_parameter("macro_mode", o.macro)
+		m.set_shader_parameter("macro_tex", tex("ground_macro"))
+	_tmat_cache[key] = m
+	return m
+
+
+static func slug(hex: String) -> String:
+	return hex.trim_prefix("#").to_lower()
+
+
 func plaster(hex: String) -> ShaderMaterial:
-	if not _plaster_cache.has(hex):
-		_plaster_cache[hex] = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color(hex), "mode": 0})
-	return _plaster_cache[hex]
+	return tmat("plaster_" + slug(hex), Vector2(6.5, 6.5), {"rough": 0.93})
 
 
-var _stone_cache := {}
 func stone(hex: String) -> ShaderMaterial:
-	if not _stone_cache.has(hex):
-		_stone_cache[hex] = _shader_mat("res://shaders/wall.gdshader", {"albedo": Color(hex), "mode": 1})
-	return _stone_cache[hex]
+	return tmat("ashlar_" + slug(hex), Vector2(3, 3), {"rough": 0.9, "depth": 0.6})
 
 
-var _roof_cache := {}
 func roof_mat(hex: String) -> ShaderMaterial:
-	if not _roof_cache.has(hex):
-		_roof_cache[hex] = _shader_mat("res://shaders/roof.gdshader", {"albedo": Color(hex)})
-	return _roof_cache[hex]
+	return tmat("roof_" + slug(hex), Vector2(1.44, 1.2), {"rough": 1.0, "two_sided": true, "depth": 0.8})
+
+
+func timber(hex: String) -> ShaderMaterial:
+	return tmat("timber_" + slug(hex), Vector2(2, 2), {"rough": 0.85})
+
+
+func wood(hex: String) -> ShaderMaterial:
+	return tmat("wood_" + slug(hex), Vector2(2, 2), {"rough": 0.7, "normal": "wood_nrm", "depth": 0.5})
 
 
 var _std_cache := {}
@@ -286,9 +337,16 @@ static func local_rect(xf: Transform3D, cx: float, cz: float, w: float, d: float
 	return rect(c.x - sw / 2, c.z - sd / 2, c.x + sw / 2, c.z + sd / 2)
 
 
-func flat(r: Rect2, y: float, mat: Material, uv := 1.0) -> void:
-	b.quad(Transform3D.IDENTITY, Vector3(r.position.x, y, r.position.y), Vector3(r.end.x, y, r.position.y),
-		Vector3(r.end.x, y, r.end.y), Vector3(r.position.x, y, r.end.y), mat, Vector3.UP, uv, false)
+## Flat ground patch. The texture's v axis runs along z, or along x when along_x (cobble arcs follow the street).
+func flat(r: Rect2, y: float, mat: Material, uv := 1.0, along_x := false) -> void:
+	var p0 := Vector3(r.position.x, y, r.end.y)
+	var p1 := Vector3(r.end.x, y, r.end.y)
+	var p2 := Vector3(r.end.x, y, r.position.y)
+	var p3 := Vector3(r.position.x, y, r.position.y)
+	if along_x:
+		b.quad(Transform3D.IDENTITY, p3, p0, p1, p2, mat, Vector3.UP, uv, false)
+	else:
+		b.quad(Transform3D.IDENTITY, p0, p1, p2, p3, mat, Vector3.UP, uv, false)
 
 
 func label(text: String, xf: Transform3D, size := 64, color := Color.WHITE, px := 0.004) -> Label3D:
@@ -369,7 +427,11 @@ func random_spot(range_m: float) -> Vector2:
 
 func set_night(on: bool) -> void:
 	for g in night_glows:
-		g.mat.emission_energy_multiplier = g.energy if on else 0.0
+		var e: float = g.energy if on else 0.0
+		if g.mat is ShaderMaterial:
+			g.mat.set_shader_parameter("emission", e)
+		else:
+			g.mat.emission_energy_multiplier = e
 
 
 # ----------------------------------------------------------------------------------------------
@@ -416,21 +478,17 @@ static func _lot_less(a: Dictionary, c: Dictionary) -> bool:
 # ----------------------------------------------------------------------------------------------
 func _terrain_and_roads() -> void:
 	var G := GROUND
-	var ground := MeshInstance3D.new()
-	var pm := PlaneMesh.new()
-	pm.size = Vector2(2 * G, 2 * G)
-	pm.subdivide_width = 24
-	pm.subdivide_depth = 24
-	ground.mesh = pm
-	ground.material_override = mats.grass
-	ground.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
-	add_child(ground)
+	flat(rect(-G, -G, G, G), 0.0, mats.grass)
 
 	for s in NS_STREETS:
 		flat(rect(s.x - NS_HALF, -ns_len, s.x + NS_HALF, ns_len), 0.02, mats.cobble)
 	for s in EW_STREETS:
-		flat(rect(-ew_len, s.z - EW_HALF, ew_len, s.z + EW_HALF), 0.025, mats.cobble)
+		flat(rect(-ew_len, s.z - EW_HALF, ew_len, s.z + EW_HALF), 0.025, mats.cobble, 1.0, true)
 	flat(rect(-NS_HALF, -FENCE - 6, NS_HALF, -ns_len), 0.02, mats.cobble)
+	# Junctions: a cobbled patch on top wherever two roads meet
+	for n in NS_STREETS:
+		for e in EW_STREETS:
+			flat(rect(n.x - NS_HALF, e.z - EW_HALF, n.x + NS_HALF, e.z + EW_HALF), 0.03, mats.cobble)
 
 	# Pavements along each street between the junctions, so they never sit on a road
 	var NS := NS_HALF
@@ -482,40 +540,58 @@ func _sidewalk(x: float, z: float, w: float, l: float, h: float, axis: String, k
 	var I := Transform3D.IDENTITY
 	b.box(I, Vector3(x, h / 2, z), Vector3(w, h, l), mats.slab, 1.0, false)
 	solid(I, Vector3(x, h / 2, z), Vector3(w, h, l))
+	# granite kerb, and a gutter of three rows of setts along it on the road side
 	if axis == "x":
 		b.box(I, Vector3(k, (h + 0.015) / 2, z), Vector3(0.24, h + 0.015, l), mats.kerb, 1.0, false)
+		var gx := k - signf(x - k) * 0.30
+		flat(rect(gx - 0.1875, z - l / 2, gx + 0.1875, z + l / 2), 0.034, mats.gutter)
 	elif axis == "z":
 		b.box(I, Vector3(x, (h + 0.015) / 2, k), Vector3(w, h + 0.015, 0.24), mats.kerb, 1.0, false)
+		var gz := k - signf(z - k) * 0.30
+		flat(rect(x - w / 2, gz - 0.1875, x + w / 2, gz + 0.1875), 0.034, mats.gutter, 1.0, true)
 
 
 # ----------------------------------------------------------------------------------------------
 # Houses
 # ----------------------------------------------------------------------------------------------
-const PLASTERS := ["#efe6d2", "#e8d9b5", "#f1e3c8", "#dcc9a3", "#e9d3c0", "#d9c7a8", "#f0ead8", "#e2c9a6", "#cfd6c4", "#e8cfc0", "#f3e9c6", "#d8c3b0"]
-const ROOFS := ["#9c4a2f", "#8a3f2a", "#a55a3a", "#7a3a2a", "#94503a", "#4a4f57"]
-const STONES := ["#c9b89a", "#b9a587", "#d3c4a8", "#a8714f", "#bfae94"]
-const SHUTTERS := ["#2f5d3a", "#6b2a24", "#2d4a6b", "#4a3222", "#3c5a52"]
-const DOORS := ["#4a3222", "#6b2a24", "#2f5d3a", "#2d4a6b", "#5a3a28"]
+## Deterministic 0..1 hash of up to four integers: the same function as `hash` in oldtown.js
+static func jhash(a: int, b := 0, c := 0, d := 0) -> float:
+	var M := 0xffffffff
+	var h := (((a & M) * 374761393) & M) + (((b & M) * 668265263) & M) + (((c & M) * 1274126177) & M) + (((d & M) * 1103515245) & M)
+	h &= M
+	h = (((h ^ (h >> 13)) & M) * 1274126177) & M
+	h ^= h >> 16
+	return float(h) / 4294967296.0
+
 
 static func hash01(a: int, c: int) -> float:
-	var h := (a * 374761393 + c * 668265263) & 0x7fffffff
-	h = ((h ^ (h >> 13)) * 1274126177) & 0x7fffffff
-	return float(h % 10000) / 10000.0
+	return jhash(a, c, 77)
 
 
+## House style, ported from townStyle() in oldtown.js so every house gets the same look as on the web
 func _style(idx: int) -> Dictionary:
-	var gothic := hash01(idx, 1) < 0.33 and idx != 0
+	var plasters := ["#f1e7d2", "#efe2c0", "#e9c98f", "#e8b79c", "#dfe3c9", "#f2e9da", "#e6cfc2", "#d9dee0", "#efd9a6", "#e4d4b8"]
+	var timbers := ["#3a2416", "#4a2a1a", "#2c2420", "#5a2a1c", "#3e2c1e"]
+	var roofs := ["#a0492f", "#93412b", "#ad5a38", "#7c3d2b", "#8e4b34", "#a95234"]
+	var shutters := ["#3f6b4a", "#2f506e", "#7a3b2e", "#55452f", "#4a6b6b"]
+	var doors := ["#5a3a22", "#3f4f3a", "#6b2f24", "#2f3f52", "#704a2a"]
+	var stones := ["#cbb38b", "#b8b1a3", "#a8634f", "#d6c4a0", "#9a5a46"]
+	var f := jhash(idx, 1, 501)
+	var gothic := jhash(idx, 10, 501) < 0.34
+	var frame := "gothic" if gothic else ("full" if f < 0.6 else ("upper" if f < 0.85 else "none"))
 	return {
 		"gothic": gothic,
-		"plaster": PLASTERS[int(hash01(idx, 2) * PLASTERS.size())],
-		"stone": STONES[int(hash01(idx, 3) * STONES.size())],
-		"roof": ROOFS[int(hash01(idx, 4) * ROOFS.size())],
-		"timber": not gothic and hash01(idx, 5) < 0.75,
-		"ridge_z": gothic or hash01(idx, 6) < 0.7,
-		"pitch": deg_to_rad(48.0 + hash01(idx, 7) * 8.0),
-		"shutter": SHUTTERS[int(hash01(idx, 8) * SHUTTERS.size())],
-		"door": DOORS[int(hash01(idx, 9) * DOORS.size())],
-		"hedge": hash01(idx, 10) < 0.45,
+		"frame": frame,
+		"timber": frame == "full" or frame == "upper",
+		"plaster": plasters[int(jhash(idx, 2, 501) * plasters.size())],
+		"timber_color": timbers[int(jhash(idx, 3, 501) * timbers.size())],
+		"roof": roofs[int(jhash(idx, 4, 501) * roofs.size())],
+		"shutter": shutters[int(jhash(idx, 5, 501) * shutters.size())],
+		"door": doors[int(jhash(idx, 6, 501) * doors.size())],
+		"ridge_z": gothic or jhash(idx, 7, 501) < 0.65,
+		"pitch": deg_to_rad(55.0 if gothic else 47.0 + jhash(idx, 8, 501) * 7.0),
+		"stone": stones[int(jhash(idx, 11, 501) * stones.size())],
+		"hedge": jhash(idx, 9, 501) < 0.5,
 	}
 
 
@@ -552,7 +628,7 @@ func _house(idx: int, x: float, z: float, rot: float, cfg: Dictionary) -> void:
 
 	# Body on a stone plinth (solid for now: interiors come in a later iteration)
 	bx(xf, 0, H / 2, 0, W, H, D, wall, true)
-	bx(xf, 0, 0.3, 0, W + 0.14, 0.6, D + 0.14, mats.palestone)
+	bx(xf, 0, 0.3, 0, W + 0.14, 0.6, D + 0.14, mats.sandstone)
 
 	# Gable roof: ridge front-to-back (gable to the street) or along the street
 	var t := tan(st.pitch)
@@ -629,7 +705,7 @@ func _house(idx: int, x: float, z: float, rot: float, cfg: Dictionary) -> void:
 	# Entrance: sandstone step, door frame, door, canopy, number plate, doorbell, porch lantern
 	bx(front, 0, 0.09, 0.45, 2.4, 0.18, 0.9, mats.palestone)
 	bx(front, 0, 1.3, 0.03, 1.7, 2.6, 0.08, mats.palestone)
-	bx(front, 0, 1.2, 0.08, 1.2, 2.3, 0.06, color_mat(st.door))
+	bx(front, 0, 1.2, 0.08, 1.2, 2.3, 0.06, wood(st.door))
 	bx(front, 0.4, 1.15, 0.13, 0.08, 0.08, 0.06, mats.brass, false, false)
 	if not gothic:
 		bx(front, 0, 2.85, 0.5, 2.2, 0.1, 1.0, rmat)
@@ -653,7 +729,7 @@ func _house(idx: int, x: float, z: float, rot: float, cfg: Dictionary) -> void:
 	b.quad(xf, Vector3(-W / 2, 4.6, -5.8), Vector3(-W / 2, 4.6, 3.8), Vector3(-W / 2 - gw - 0.4, 3.05, 3.8), Vector3(-W / 2 - gw - 0.4, 3.05, -5.8), rmat, Vector3(-0.5, 1, 0))
 	b.tri(xf, Vector3(-W / 2 - gw, 3.2, 3.5), Vector3(-W / 2, 3.2, 3.5), Vector3(-W / 2, 4.6, 3.5), wall, Vector3.BACK)
 	b.tri(xf, Vector3(-W / 2 - gw, 3.2, -5.5), Vector3(-W / 2, 3.2, -5.5), Vector3(-W / 2, 4.6, -5.5), wall, Vector3.FORWARD)
-	bx(xf, gx, 1.35, 3.53, 5.4, 2.7, 0.08, color_mat(st.door))
+	bx(xf, gx, 1.35, 3.53, 5.4, 2.7, 0.08, wood(st.door))
 	for k in 5:
 		bx(xf, gx - 2.2 + k * 1.1, 1.35, 3.58, 0.06, 2.6, 0.03, mats.dark_oak, false, false)
 
@@ -666,9 +742,9 @@ func _house(idx: int, x: float, z: float, rot: float, cfg: Dictionary) -> void:
 		var c: float = (seg[0] + seg[1]) / 2
 		var len: float = seg[1] - seg[0]
 		if st.hedge:
-			bx(xf, c, 0.55, 17, len, 1.1, 0.7, mats.hedge_std, true)
+			bx(xf, c, 0.55, 17, len, 1.1, 0.7, mats.hedge, true)
 		else:
-			bx(xf, c, 0.4, 17, len, 0.8, 0.35, mats.palestone, true)
+			bx(xf, c, 0.4, 17, len, 0.8, 0.35, mats.sandstone, true)
 			bx(xf, c, 0.85, 17, len + 0.05, 0.1, 0.45, mats.palestone)
 	var gate := xf * Vector3(0, 0, 17)
 	gate_spots.append(Vector2(gate.x, gate.z))
@@ -693,8 +769,8 @@ func _window(f: Transform3D, u: float, y: float, w: float, h: float, st: Diction
 
 ## Gothic lancet: tall narrow window with a pointed head and a stone hood mould
 func _lancet(f: Transform3D, u: float, y: float, w: float, h: float, _st: Dictionary) -> void:
-	bx(f, u, y, 0.02, w, h, 0.06, mats.glass_lit, false, false)
-	b.tri(f, Vector3(u - w / 2, y + h / 2, 0.05), Vector3(u + w / 2, y + h / 2, 0.05), Vector3(u, y + h / 2 + w * 0.8, 0.05), mats.glass_lit, Vector3.BACK, 1.0, false)
+	bx(f, u, y, 0.02, w, h, 0.06, mats.leaded, false, false)
+	b.tri(f, Vector3(u - w / 2, y + h / 2, 0.05), Vector3(u + w / 2, y + h / 2, 0.05), Vector3(u, y + h / 2 + w * 0.8, 0.05), mats.leaded, Vector3.BACK, 1.0, false)
 	bx(f, u - w / 2 - 0.07, y + 0.1, 0.07, 0.14, h + 0.2, 0.12, mats.palestone, false, false)
 	bx(f, u + w / 2 + 0.07, y + 0.1, 0.07, 0.14, h + 0.2, 0.12, mats.palestone, false, false)
 	bx(f, u, y - h / 2 - 0.06, 0.1, w + 0.4, 0.12, 0.2, mats.palestone, false, false)
@@ -703,19 +779,22 @@ func _lancet(f: Transform3D, u: float, y: float, w: float, h: float, _st: Dictio
 ## Timber frame (Fachwerk): sill, floor and wall-plate beams, posts between the openings, corner braces
 func _fachwerk(xf: Transform3D, st: Dictionary, rise: float) -> void:
 	var H := HOUSE_H
+	var tm := timber(st.timber_color)
+	var y0 := 0.68 if st.frame == "full" else 3.25     # "upper": only the upper storey is framed
 	for face in 4:
 		var f := face_xf(xf, face)
 		var width := HOUSE_W if face % 2 == 0 else HOUSE_D
 		var hw := width / 2
 		for y in [0.68, 3.25, 6.35]:
-			bx(f, 0, y, 0.04, width, 0.18, 0.06, mats.oak, false, false)
+			if y >= y0:
+				bx(f, 0, y, 0.04, width, 0.18, 0.06, tm, false, false)
 		var posts: Array = []
 		if face % 2 == 0:
 			posts = [-hw + 0.1, -7.0, -4.25, -1.6, 1.6, 4.25, 7.0, hw - 0.1]
 		else:
 			posts = [-hw + 0.1, -6.0, -2.0, 2.0, 6.0, hw - 0.1]
 		for p in posts:
-			bx(f, p, (0.68 + 6.35) / 2, 0.04, 0.16, 6.35 - 0.68, 0.06, mats.oak, false, false)
+			bx(f, p, (y0 + 6.35) / 2, 0.04, 0.16, 6.35 - y0, 0.06, tm, false, false)
 		# K-braces in the corner panels of the upper floor
 		for s in [-1, 1]:
 			var x0: float = s * (hw - 0.1)
@@ -724,15 +803,15 @@ func _fachwerk(xf: Transform3D, st: Dictionary, rise: float) -> void:
 			var dx := x1 - x0
 			var dy := 6.35 - 3.25
 			var ang := atan2(dy, dx)
-			b.box(f * Transform3D(Basis(Vector3.BACK, ang), mid), Vector3.ZERO, Vector3(sqrt(dx * dx + dy * dy), 0.15, 0.06), mats.oak, 1.0, false)
+			b.box(f * Transform3D(Basis(Vector3.BACK, ang), mid), Vector3.ZERO, Vector3(sqrt(dx * dx + dy * dy), 0.15, 0.06), tm, 1.0, false)
 	# Collar beam and king post in the street gable
 	if st.ridge_z:
 		var f0 := face_xf(xf, 0)
 		var yc := H + rise * 0.42
-		bx(f0, 0, yc, 0.04, HOUSE_W * (1 - 0.42) - 0.2, 0.16, 0.06, mats.oak, false, false)
-		bx(f0, 0, H + rise * 0.21, 0.04, 0.16, rise * 0.42, 0.06, mats.oak, false, false)
+		bx(f0, 0, yc, 0.04, HOUSE_W * (1 - 0.42) - 0.2, 0.16, 0.06, tm, false, false)
+		bx(f0, 0, H + rise * 0.21, 0.04, 0.16, rise * 0.42, 0.06, tm, false, false)
 		for s in [-1, 1]:
-			bx(f0, s * 4.0, H + rise * 0.21, 0.04, 0.16, rise * 0.4, 0.06, mats.oak, false, false)
+			bx(f0, s * 4.0, H + rise * 0.21, 0.04, 0.16, rise * 0.4, 0.06, tm, false, false)
 
 
 ## Gothic stone front: stepped gable and a ground-floor arcade of pointed arches
@@ -822,10 +901,13 @@ func _church() -> void:
 	# Lancets and stepped buttresses along the nave
 	for sx in [-1, 1]:
 		var f := Transform3D(Basis(Vector3.UP, sx * PI / 2), Vector3(CX + sx * 7, 0, 0))
+		var wk := 0
 		for zc in [38.5, 43.5, 48.5, 53.5, 58.5]:
 			var u: float = -zc * sx
-			bx(f, u, 7, 0.02, 1.6, 6.0, 0.06, mats.church_glass, false, false)
-			b.tri(f, Vector3(u - 0.8, 10, 0.05), Vector3(u + 0.8, 10, 0.05), Vector3(u, 11.6, 0.05), mats.church_glass, Vector3.BACK, 1.0, false)
+			var gm: Material = mats.church_glass[wk % 5]
+			wk += 1
+			bx(f, u, 7, 0.02, 1.6, 6.0, 0.06, gm, false, false)
+			b.tri(f, Vector3(u - 0.8, 10, 0.05), Vector3(u + 0.8, 10, 0.05), Vector3(u, 11.6, 0.05), gm, Vector3.BACK, 1.0, false)
 			bx(f, u, 7, 0.06, 0.08, 6.0, 0.06, mats.palestone, false, false)
 		for zc in [36.0, 41.0, 46.0, 51.0, 56.0, 60.6]:
 			var u: float = -zc * sx
@@ -851,7 +933,7 @@ func _warehouse() -> void:
 	var cz := (z0 + z1) / 2
 	# Access road with pavements
 	road_rects.append(rect(x1, -EW_HALF, -ew_len, EW_HALF))
-	flat(rect(x1, -EW_HALF, -ew_len, EW_HALF), 0.025, mats.cobble)
+	flat(rect(x1, -EW_HALF, -ew_len, EW_HALF), 0.025, mats.cobble, 1.0, true)
 	var walk_len := (-ew_len - WALK) - x1
 	for s in [-1, 1]:
 		_sidewalk(x1 + walk_len / 2, s * (EW_HALF + WALK / 2), walk_len, WALK, 0.245, "z", s * (EW_HALF + 0.11))
@@ -909,7 +991,7 @@ func _warehouse() -> void:
 	bx(I, x1 + 0.27, 5.85, 0, 0.02, 0.16, 8.5, color_mat("#f2c230"), false, false)
 	label("PARCEL DEPOT", Transform3D(Basis(Vector3.UP, PI / 2), Vector3(x1 + 0.27, 6.6, 0)), 200, Color.WHITE, 0.0065)
 	# Pallets and the ledger desk
-	var pallet := color_mat("#a9865c")
+	var pallet := wood("#a9865c")
 	for i in 4:
 		var px := x0 + 3 + i * 1.4
 		for dy in [0.0, 0.15]:
@@ -1261,13 +1343,20 @@ func _commit_trees() -> void:
 	trunk.rings = 1
 	trunk.cap_top = false
 	trunk.cap_bottom = false
-	_multimesh(trunk, _trunks, mats.bark, false)
+	var bark := StandardMaterial3D.new()
+	bark.albedo_texture = tex("bark_col")
+	bark.normal_enabled = true
+	bark.normal_texture = tex("bark_nrm")
+	bark.uv1_scale = Vector3(2, 3, 1)
+	bark.roughness = 0.95
+	bark.texture_filter = BaseMaterial3D.TEXTURE_FILTER_LINEAR_WITH_MIPMAPS_ANISOTROPIC
+	_multimesh(trunk, _trunks, bark, false)
 	var crown := SphereMesh.new()
 	crown.radius = 1.0
 	crown.height = 2.0
 	crown.radial_segments = 10
 	crown.rings = 6
-	var fol := _shader_mat("res://shaders/foliage.gdshader", {"sway": 0.035})
+	var fol := _shader_mat("res://shaders/foliage.gdshader", {"sway": 0.035, "leaf_tex": tex("foliage_leaf_col")})
 	_multimesh(crown, _crowns, fol, true)
 	var cone := CylinderMesh.new()
 	cone.top_radius = 0.0
@@ -1276,7 +1365,7 @@ func _commit_trees() -> void:
 	cone.radial_segments = 9
 	cone.rings = 1
 	cone.cap_top = false
-	_multimesh(cone, _cones, _shader_mat("res://shaders/foliage.gdshader", {"sway": 0.02}), true)
+	_multimesh(cone, _cones, _shader_mat("res://shaders/foliage.gdshader", {"sway": 0.02, "leaf_tex": tex("foliage_bush_col")}), true)
 
 
 func _multimesh(mesh: Mesh, list: Array, mat: Material, colors: bool) -> void:

@@ -26,7 +26,13 @@ A Godot 4.7 port of the Three.js / WebView game in `../tidyup`. It is a first-pe
 
 ## How it is built
 
-Everything is generated in code, as in the web version. There are no models or textures.
+The town is generated in code, as in the web version. The textures are the web game's own: `tools/export_textures.py` runs `../tidyup/js/textures.js` (and the old-town files that extend it) in headless Chrome and saves every texture to `assets/textures/` as PNGs, with bump maps converted to normal maps. Run it again whenever the web textures change:
+
+```
+python tools/export_textures.py
+```
+
+Then open the project once (or run `--import`) so Godot re-imports them. The `_nrm` files must keep `compress/normal_map=1` in their `.import` files.
 
 | File | Ported from | What it does |
 |---|---|---|
@@ -38,7 +44,8 @@ Everything is generated in code, as in the web version. There are no models or t
 | `scripts/sky_cycle.gd` + `shaders/sky.gdshader` | sky.js | 20-minute day, keyframed sky colours, sun and moon, stars, clouds, weather |
 | `scripts/sfx.gd` | audio.js | Sound effects synthesised into WAVs at start-up, the soundtrack, birds by day and crickets at night |
 | `scripts/hud.gd`, `scripts/minimap.gd` | index.html, game.js | HUD, minimap, start and pause menu |
-| `shaders/*.gdshader` | textures.js | Procedural cobbles, slabs, plaster and ashlar, roof tiles, grass, water, foliage, mountains, cardboard |
+| `shaders/textured*.gdshader` | textures.js materials | The exported textures at the web version's tile sizes, plus its world-space ground and stone tints |
+| `shaders/*.gdshader` (others) | sky.js, world.js | Sky, water, swaying foliage, mountains, parcels |
 
 ## Port status
 

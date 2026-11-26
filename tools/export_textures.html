@@ -1,0 +1,112 @@
+<!DOCTYPE html>
+<!--
+  Texture exporter: runs the web game's own texture generators (../../tidyup/js) and writes every texture the
+  Godot port uses into the page as PNG data URLs. tools/export_textures.py opens this page in headless Chrome,
+  reads the data URLs back and saves them to assets/textures/. Bump maps are converted to normal maps here.
+-->
+<html>
+<head>
+<meta charset="UTF-8">
+<script src="../../tidyup/js/graphics.js"></script>
+<script src="../../tidyup/desktop/.cache/three.min.js"></script>
+<script src="../../tidyup/js/textures.js"></script>
+<script src="../../tidyup/js/world.js"></script>
+<script src="../../tidyup/js/oldtown.js"></script>
+<script src="../../tidyup/js/gothic.js"></script>
+<script src="../../tidyup/js/townsquares.js"></script>
+<script src="../../tidyup/js/citywall.js"></script>
+</head>
+<body>
+<script>
+(function () {
+    const tg = window.textureGen;
+    const out = document.createElement('div');
+    out.id = 'textures';
+    document.body.appendChild(out);
+    const canvasOf = (t) => (t && t.image) ? t.image : t;
+
+    // Height (bump) canvas -> tangent-space normal map (OpenGL convention: green = up the image)
+    function toNormal(canvas, strength) {
+        const W = canvas.width, H = canvas.height;
+        const src = canvas.getContext('2d').getImageData(0, 0, W, H).data;
+        const c = document.createElement('canvas');
+        c.width = W; c.height = H;
+        const ctx = c.getContext('2d');
+        const img = ctx.createImageData(W, H), d = img.data;
+        const h = (x, y) => src[(((y + H) % H) * W + ((x + W) % W)) * 4] / 255;
+        for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+            const dx = (h(x + 1, y) - h(x - 1, y)) * 0.5 * strength;
+            const dy = (h(x, y + 1) - h(x, y - 1)) * 0.5 * strength;
+            let nx = -dx, ny = dy, nz = 1;
+            const l = Math.hypot(nx, ny, nz);
+            const i = (y * W + x) * 4;
+            d[i] = (nx / l * 0.5 + 0.5) * 255;
+            d[i + 1] = (ny / l * 0.5 + 0.5) * 255;
+            d[i + 2] = (nz / l * 0.5 + 0.5) * 255;
+            d[i + 3] = 255;
+        }
+        ctx.putImageData(img, 0, 0);
+        return c;
+    }
+
+    function emit(name, canvas) {
+        const pre = document.createElement('pre');
+        pre.dataset.name = name;
+        pre.textContent = canvas.toDataURL('image/png');
+        out.appendChild(pre);
+    }
+    // set = {map, bump, rough}; bumpStrength scales the normal map
+    function set(name, s, bumpStrength) {
+        if (s.map) emit(name + '_col', canvasOf(s.map));
+        if (s.bump && bumpStrength) emit(name + '_nrm', toNormal(canvasOf(s.bump), bumpStrength));
+        if (s.rough) emit(name + '_rgh', canvasOf(s.rough));
+    }
+    const slug = (hex) => hex.replace('#', '');
+    const W = NeighbourhoodWorld.prototype;
+
+    try {
+        set('grass', tg.buildGrass(), 6);
+        emit('ground_macro', canvasOf(tg.getGroundMacroTexture()));
+        set('cobble', tg.buildCobbles(), 8);
+        set('sett', tg.buildSetts(), 6);
+        set('slab', tg.buildSlabs(), 5);
+        set('pavers', tg.buildPavers(), 5);
+        // Stone: oldTownMats() first, so the red sandstone gets its own mortar (the cache key ignores mortar)
+        set('ashlar_c9b08a', tg.buildAshlar('#c9b08a'), 5);
+        set('ashlar_a8634f', tg.buildAshlar('#a8634f', '#cdb9a0'), 5);
+        set('ashlar_d6c29b', tg.buildAshlar('#d6c29b'), 5);
+        ['#cbb38b', '#b8b1a3', '#d6c4a0', '#9a5a46'].forEach(h => set('ashlar_' + slug(h), tg.buildAshlar(h), 5));
+        set('ashlar_a89a84', tg.buildAshlar('#a89a84', '#c4b9a6'), 5);
+        // Roofs
+        ['#a0492f', '#93412b', '#ad5a38', '#7c3d2b', '#8e4b34', '#a95234'].forEach(h => set('roof_' + slug(h), tg.buildRoofTiles(h, 'clay'), 6));
+        set('slate', tg.buildRoofTiles('#56606b', 'slate'), 6);
+        // Plaster (townStyle colours, the chimney render)
+        ['#f1e7d2', '#efe2c0', '#e9c98f', '#e8b79c', '#dfe3c9', '#f2e9da', '#e6cfc2', '#d9dee0', '#efd9a6', '#e4d4b8', '#d9d2c4']
+            .forEach(h => emit('plaster_' + slug(h) + '_col', canvasOf(tg.getPlasterTexture(h))));
+        // Timber, wood
+        ['#3a2416', '#4a2a1a', '#2c2420', '#5a2a1c', '#3e2c1e', '#6b4c33'].forEach(h => emit('timber_' + slug(h) + '_col', canvasOf(tg.getTimberTexture(h))));
+        ['#4a2e1a', '#a9865c', '#5a3a22', '#3f4f3a', '#6b2f24', '#2f3f52', '#704a2a'].forEach(h => emit('wood_' + slug(h) + '_col', canvasOf(tg.getWoodPlankTexture(h))));
+        emit('wood_nrm', toNormal(canvasOf(tg.getWoodBumpMap()), 4));
+        // Church, glass
+        emit('copper_col', canvasOf(tg.getCopperTexture()));
+        emit('clockface_col', canvasOf(tg.getClockFaceTexture()));
+        for (let k = 0; k < 5; k++) emit('stainedglass_' + k + '_col', canvasOf(tg.getStainedGlassTexture(k)));
+        emit('leadedglass_col', canvasOf(tg.getLeadedGlassTexture()));
+        // Depot, parcels, park, trees
+        emit('corrugated_7d8b93_col', canvasOf(tg.getCorrugatedTexture('#7d8b93')));
+        emit('corrugated_b9c0c4_col', canvasOf(tg.getCorrugatedTexture('#b9c0c4')));
+        emit('depotfloor_col', canvasOf(tg.getWarehouseFloorTexture()));
+        emit('cardboard_col', canvasOf(tg.getCardboardTexture()));
+        emit('gravel_col', canvasOf(tg.getGravelTexture()));
+        set('bark', tg.buildBark(), 4);
+        set('foliage_leaf', tg.buildFoliage('leaf'), 4);
+        set('foliage_bush', tg.buildFoliage('bush'), 4);
+        emit('arms_col', canvasOf(tg.getArmsTexture()));
+        out.dataset.done = '1';
+    } catch (e) {
+        out.dataset.error = String(e && e.stack || e);
+    }
+})();
+</script>
+</body>
+</html>
