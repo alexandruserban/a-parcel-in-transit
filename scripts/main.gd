@@ -626,6 +626,9 @@ func _drive_test() -> void:
 	var img := get_viewport().get_texture().get_image()
 	var args := OS.get_cmdline_user_args()
 	img.save_png(args[args.find("--drive") + 1].path_join("shot_driving.png"))
+	truck.toggle_view()   # the cab view
+	await get_tree().create_timer(0.5).timeout
+	get_viewport().get_texture().get_image().save_png(args[args.find("--drive") + 1].path_join("shot_cab.png"))
 	ev.pressed = false
 	Input.parse_input_event(ev)
 	evl.pressed = false

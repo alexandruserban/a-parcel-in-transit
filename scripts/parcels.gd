@@ -154,6 +154,7 @@ func prompt_for(rec: Dictionary) -> String:
 # dropped somewhere new. Anything filed in the depot is safe.
 # ------------------------------------------------------------------------------------------------
 var flights: Array = []
+const BOUNCE_TIME := 0.9   # seconds a landing parcel hops before it settles
 
 
 func _landing_spot(range_m := 140.0) -> Vector2:
@@ -199,8 +200,22 @@ func update_gust(gust_t: float, gust: float, dt: float) -> void:
 		if t >= 1.0:
 			if rec.flying:
 				var to: Vector3 = f.to
-				rec.rot = rng.randf() * PI
-				rec.pos = Vector3(to.x, world.ground_y_at(to.x, to.z) + h / 2 + 0.01, to.z)
+				var rest_y: float = world.ground_y_at(to.x, to.z) + h / 2 + 0.01
+				if not f.has("land_t"):   # touch down: pick the resting yaw, then bounce
+					f.land_t = gust_t
+					f.yaw = rng.randf() * PI
+					f.tilt_axis = Vector3(rng.randf() - 0.5, 0, rng.randf() - 0.5).normalized()
+				var tau: float = (gust_t - f.land_t) / BOUNCE_TIME
+				if tau < 1.0:
+					# three hops, each lower than the last, rocking a little as it settles
+					var fade := (1.0 - tau) * (1.0 - tau)
+					var hop := absf(sin(tau * PI * 3.0)) * 0.45 * fade
+					var tilt := sin(tau * PI * 6.0) * 0.25 * fade
+					rec.pos = Vector3(to.x, rest_y + hop, to.z)
+					_mm[rec.size].set_instance_transform(rec.slot, Transform3D(Basis(f.tilt_axis, tilt) * Basis(Vector3.UP, f.yaw), rec.pos))
+					continue
+				rec.rot = f.yaw
+				rec.pos = Vector3(to.x, rest_y, to.z)
 				var S: Dictionary = SIZES[rec.size]
 				rec.hx = maxf(S.w, S.d) * 0.45
 				rec.hz = rec.hx

@@ -63,7 +63,10 @@ func _build_model() -> void:
 	var paint := _std(Color("#f3f2ee"), 0.35, 0.15)
 	var orange := _std(Color("#e8731c"), 0.4, 0.15)
 	var dark := _std(Color("#1f2124"), 0.6, 0.3)
-	var glass := _std(Color("#182028"), 0.05, 0.6)
+	# see-through windscreen and side windows (from the cab you look out through them)
+	var glass := _std(Color(Color("#182028"), 0.35), 0.05, 0.6)
+	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+	glass.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var rubber := _std(Color("#151515"), 0.9)
 	var hub := _std(Color("#b8bcc0"), 0.3, 0.9)
 	var door := _std(Color("#d8dbde"), 0.35, 0.5)
