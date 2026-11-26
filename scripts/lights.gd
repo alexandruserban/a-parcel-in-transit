@@ -5,7 +5,8 @@ extends RefCounted
 
 const CX := -45.0      # church tower
 const TZ := 30.5
-const BULB_COLORS := ["#ff4a3d", "#ffc23a", "#5fe36a", "#4aa8ff", "#ff6ad5", "#ff8c2a", "#b77bff"]
+const BULB_COLORS := ["#ff1a1a", "#ffb000", "#19e632", "#1a6bff", "#ff19c8", "#ff6a00", "#9a2bff", "#00d9e6"]
+const POLE_H := 5.0
 
 static func _spot(w, at: Vector3, target: Vector3, col: Color, energy: float, range_m: float, angle: float) -> SpotLight3D:
 	var l := SpotLight3D.new()
@@ -95,15 +96,15 @@ static func park(w) -> void:
 		strings.append([ring[i], ring[(i + 1) % n]])
 	# posts
 	for p in poles:
-		b.cylinder(Transform3D.IDENTITY, p, 0.07, 0.06, 3.3, 8, pole_mat)
-		b.cylinder(Transform3D.IDENTITY, p + Vector3(0, 3.3, 0), 0.11, 0.0, 0.18, 8, pole_mat)
-		w.solid_cyl(p.x, p.z, 0.08, 3.3)
+		b.cylinder(Transform3D.IDENTITY, p, 0.09, 0.07, POLE_H, 8, pole_mat)
+		b.cylinder(Transform3D.IDENTITY, p + Vector3(0, POLE_H, 0), 0.13, 0.0, 0.22, 8, pole_mat)
+		w.solid_cyl(p.x, p.z, 0.09, POLE_H)
 	# bulbs on sagging wires
 	var bulbs: Array = []   # [pos, color]
 	var ci := 0
 	for st in strings:
-		var p0: Vector3 = st[0] + Vector3(0, 3.15, 0)
-		var p1: Vector3 = st[1] + Vector3(0, 3.15, 0)
+		var p0: Vector3 = st[0] + Vector3(0, POLE_H - 0.15, 0)
+		var p1: Vector3 = st[1] + Vector3(0, POLE_H - 0.15, 0)
 		var len := p0.distance_to(p1)
 		var sag := 0.35 + len * 0.06
 		var segs := maxi(2, int(len / 0.45))
@@ -117,8 +118,8 @@ static func park(w) -> void:
 				bulbs.append([q + Vector3(0, -0.07, 0), Color(BULB_COLORS[ci % BULB_COLORS.size()])])
 				ci += 1
 	var mesh := SphereMesh.new()
-	mesh.radius = 0.055
-	mesh.height = 0.13
+	mesh.radius = 0.075
+	mesh.height = 0.17
 	mesh.radial_segments = 8
 	mesh.rings = 4
 	var mm := MultiMesh.new()
@@ -131,17 +132,18 @@ static func park(w) -> void:
 		mm.set_instance_color(i, bulbs[i][1])
 	var mat := ShaderMaterial.new()
 	mat.shader = preload("res://shaders/bulbs.gdshader")
-	w.night_glows.append({"mat": mat, "energy": 1.3})
+	w.night_glows.append({"mat": mat, "energy": 0.9})   # kept under the bloom threshold so the colours stay pure
 	var mi := MultiMeshInstance3D.new()
 	mi.multimesh = mm
 	mi.material_override = mat
 	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
 	w.add_child(mi)
 	# coloured light pooling under the strings
-	var spots := [Vector3(-70, 2.6, 81), Vector3(-55, 2.6, 81), Vector3(-30, 2.6, 81), Vector3(-17, 2.6, 81),
-		Vector3(-45, 2.6, 74), Vector3(-45, 2.6, 90), Vector3(-45 - a, 2.6, lake.cz), Vector3(-45 + a, 2.6, lake.cz)]
+	var spots := [Vector3(-70, 4.0, 81), Vector3(-55, 4.0, 81), Vector3(-30, 4.0, 81), Vector3(-17, 4.0, 81),
+		Vector3(-45, 4.0, 74), Vector3(-45, 4.0, 90), Vector3(-45 - a, 4.0, lake.cz), Vector3(-45 + a, 4.0, lake.cz),
+		Vector3(-45, 4.0, lake.cz - c), Vector3(-45, 4.0, lake.cz + c)]
 	for i in spots.size():
-		_omni(w, spots[i], Color(BULB_COLORS[(i * 2) % BULB_COLORS.size()]).lerp(Color.WHITE, 0.25), 1.6, 9.0)
+		_omni(w, spots[i], Color(BULB_COLORS[(i * 3) % BULB_COLORS.size()]), 2.4, 12.0)
 
 
 static func _wire(b, p: Vector3, q: Vector3, mat: Material) -> void:

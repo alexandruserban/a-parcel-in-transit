@@ -4,7 +4,7 @@ shader_type spatial;
 uniform float emission = 0.0;
 
 void fragment() {
-	ALBEDO = COLOR.rgb * 0.55;
+	ALBEDO = COLOR.rgb * 0.7;
 	ROUGHNESS = 0.25;
 	EMISSION = COLOR.rgb * emission;
 }
