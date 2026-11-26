@@ -233,6 +233,11 @@ func wood(hex: String) -> ShaderMaterial:
 	return tmat("wood_" + slug(hex), Vector2(2, 2), {"rough": 0.7, "normal": "wood_nrm", "depth": 0.5})
 
 
+## Front door: the web stretches one copy of the plank texture over the whole door (BoxGeometry UVs)
+func door_mat(hex: String) -> ShaderMaterial:
+	return tmat("wood_" + slug(hex), Vector2(1.18, 2.28), {"rough": 0.55, "normal": "wood_nrm", "depth": 0.5})
+
+
 var _std_cache := {}
 func color_mat(hex: String) -> StandardMaterial3D:
 	if not _std_cache.has(hex):
@@ -773,7 +778,7 @@ func _house(idx: int, x: float, z: float, rot: float, cfg: Dictionary) -> void:
 	# Entrance: sandstone step, door frame, door, canopy, number plate, doorbell, porch lantern
 	bx(front, 0, 0.09, 0.45, 2.4, 0.18, 0.9, mats.palestone)
 	bx(front, 0, 1.3, 0.03, 1.7, 2.6, 0.08, mats.palestone)
-	bx(front, 0, 1.2, 0.08, 1.2, 2.3, 0.06, wood(st.door))
+	bx(front, 0, 1.2, 0.08, 1.18, 2.28, 0.06, door_mat(st.door))
 	bx(front, 0.4, 1.15, 0.13, 0.08, 0.08, 0.06, mats.brass, false, false)
 	if not gothic:
 		bx(front, 0, 2.85, 0.5, 2.2, 0.1, 1.0, rmat)
@@ -797,7 +802,7 @@ func _house(idx: int, x: float, z: float, rot: float, cfg: Dictionary) -> void:
 	b.quad(xf, Vector3(-W / 2, 4.6, -5.8), Vector3(-W / 2, 4.6, 3.8), Vector3(-W / 2 - gw - 0.4, 3.05, 3.8), Vector3(-W / 2 - gw - 0.4, 3.05, -5.8), rmat, Vector3(-0.5, 1, 0))
 	b.tri(xf, Vector3(-W / 2 - gw, 3.2, 3.5), Vector3(-W / 2, 3.2, 3.5), Vector3(-W / 2, 4.6, 3.5), wall, Vector3.BACK)
 	b.tri(xf, Vector3(-W / 2 - gw, 3.2, -5.5), Vector3(-W / 2, 3.2, -5.5), Vector3(-W / 2, 4.6, -5.5), wall, Vector3.FORWARD)
-	bx(xf, gx, 1.35, 3.53, 5.4, 2.7, 0.08, wood(st.door))
+	bx(xf, gx, 1.35, 3.53, 5.4, 2.7, 0.08, tmat("wood_6b4a2e", Vector2(2, 2), {"rough": 0.7, "normal": "wood_nrm", "depth": 0.8}))
 	for k in 5:
 		bx(xf, gx - 2.2 + k * 1.1, 1.35, 3.58, 0.06, 2.6, 0.03, mats.dark_oak, false, false)
 

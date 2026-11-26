@@ -114,6 +114,41 @@
         emit('masonry_col', canvasOf(tg.getStoneMasonryTexture()));
         set('concrete', tg.buildConcrete(), 4);
         emit('brick_7a4a36_col', canvasOf(tg.getBrickTexture('#7a4a36', '#9a9286')));
+        // House interiors (houses.js houseMats), garages, shutters
+        ['#ece6da', '#d6e0e4', '#dfe4d3', '#eadbd3', '#f4f2ee', '#55514c'].forEach(h => emit('plaster_' + slug(h) + '_col', canvasOf(tg.getPlasterTexture(h))));
+        ['#8b6a4a', '#a07c55', '#7a5536', '#4a3426', '#b89468', '#6b4a2e', '#3f6b4a', '#2f506e', '#7a3b2e', '#55452f', '#4a6b6b']
+            .forEach(h => emit('wood_' + slug(h) + '_col', canvasOf(tg.getWoodPlankTexture(h))));
+        [['#d7e6e2', 8], ['#e9eef2', 6], ['#c9c1b3', 4]].forEach(([h, n]) => emit('tile_' + slug(h) + '_' + n + '_col', canvasOf(tg.getTileTexture(h, n))));
+        emit('fabric_col', canvasOf(tg.getFabricTexture()));
+        emit('books_col', canvasOf(tg.getBooksTexture()));
+        for (let k = 0; k < 4; k++) emit('rug_' + k + '_col', canvasOf(tg.getRugTexture(k)));
+        for (let k = 0; k < 6; k++) emit('painting_' + k + '_col', canvasOf(tg.getPaintingTexture(k)));
+        // Ducks
+        ['drake', 'hen', 'duckling'].forEach(k => emit('feather_' + k + '_col', canvasOf(tg.getFeatherTexture(k))));
+        // Truck livery and the home-brewer's chalkboard (both drawn on canvases in truck.js / houses.js)
+        (function () {
+            const c = document.createElement('canvas');
+            c.width = 1024; c.height = 512;
+            const x = c.getContext('2d');
+            x.fillStyle = '#f3f2ee'; x.fillRect(0, 0, 1024, 512);
+            x.fillStyle = '#e8731c'; x.fillRect(0, 300, 1024, 40);
+            x.fillStyle = '#1f3e57';
+            x.font = 'bold 150px Arial Black, Arial'; x.textAlign = 'center'; x.textBaseline = 'middle';
+            x.fillText('PARCEL RUN', 512, 170);
+            x.font = 'bold 46px Arial'; x.fillStyle = '#e8731c';
+            x.fillText('Elm & Maple local deliveries', 512, 410);
+            x.fillStyle = '#c69a62'; x.fillRect(60, 380, 90, 70);
+            x.fillStyle = '#8a6a40'; x.fillRect(100, 380, 12, 70);
+            emit('livery_col', c);
+            const cv = document.createElement('canvas');
+            cv.width = 256; cv.height = 160;
+            const y = cv.getContext('2d');
+            y.fillStyle = '#23302a'; y.fillRect(0, 0, 256, 160);
+            y.strokeStyle = '#8a6a44'; y.lineWidth = 10; y.strokeRect(5, 5, 246, 150);
+            y.fillStyle = '#f2f0e6'; y.font = 'bold 24px Georgia'; y.fillText('BATCH #7', 70, 42);
+            y.font = '20px Georgia'; y.fillText('Hazy IPA', 80, 74); y.fillText('OG 1.062', 80, 102); y.fillText('Day 9 of 14', 66, 130);
+            emit('chalkboard_col', cv);
+        })();
         out.dataset.done = '1';
     } catch (e) {
         out.dataset.error = String(e && e.stack || e);

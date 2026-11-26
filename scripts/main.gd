@@ -9,6 +9,7 @@ const Hud := preload("res://scripts/hud.gd")
 const Parcels := preload("res://scripts/parcels.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Touch := preload("res://scripts/touch.gd")
+const Birds := preload("res://scripts/birds.gd")
 
 const BACKPACK_CAP := 10
 const LAMP_POOL := 14
@@ -29,6 +30,7 @@ var lamp_pool: Array[OmniLight3D] = []
 var _pool_t := 0.0
 var mobile := false
 var touch
+var birds
 
 
 func _ready() -> void:
@@ -59,6 +61,8 @@ func _ready() -> void:
 	parcels.world = world
 	add_child(parcels)
 	parcels.build()
+	birds = Birds.new()
+	add_child(birds)
 
 	player = Player.new()
 	player.world = world
@@ -135,6 +139,7 @@ func _mobile_graphics() -> void:
 func _process(delta: float) -> void:
 	sky.update(delta, player.global_position)
 	world.set_water_sky(sky.params, sky.sun_dir, sky.moon_dir, sky.moon_amt, sky.daylight(), sky.sun_visibility())
+	birds.update(delta, sky.daylight())
 	var night: bool = sky.is_night()
 	if night != is_night:
 		is_night = night
@@ -360,6 +365,7 @@ func _screenshot_mode() -> void:
 		[Vector3(-60, 0.1, 85), -2.6, -0.02, 11.0, "park_trees"],
 		[Vector3(-3.6, 0.1, 29.4), 0.785, 0.52, 19.0, "lamp"],
 		[Vector3(0, 0.1, 30), "moon", 0.0, 23.0, "moon", 12.0],
+		[Vector3(0, 0.1, 60), 0.6, 0.55, 11.0, "birds", 40.0],
 		[Vector3(0, 0.1, 30), "moon", 0.0, 23.0, "moonwide", 75.0],
 	]
 	# `--only a,b` renders just the named views
