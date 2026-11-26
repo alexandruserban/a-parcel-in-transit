@@ -359,14 +359,27 @@ func _screenshot_mode() -> void:
 		[Vector3(-38, 0.1, 132), 0.15, -0.12, 15.0, "pond"],
 		[Vector3(-60, 0.1, 85), -2.6, -0.02, 11.0, "park_trees"],
 		[Vector3(-3.6, 0.1, 29.4), 0.785, 0.52, 19.0, "lamp"],
+		[Vector3(0, 0.1, 30), "moon", 0.0, 23.0, "moon", 12.0],
+		[Vector3(0, 0.1, 30), "moon", 0.0, 23.0, "moonwide", 75.0],
 	]
+	# `--only a,b` renders just the named views
+	var args := OS.get_cmdline_user_args()
+	var only: PackedStringArray = args[args.find("--only") + 1].split(",") if "--only" in args else PackedStringArray()
 	for s in _shots:
+		if only.size() > 0 and not (s[4] in only):
+			continue
 		player.global_position = s[0]
-		player.yaw = s[1]
-		player.pitch = s[2]
 		sky.hour = s[3]
+		player.camera.fov = s[5] if s.size() > 5 else 75.0
+		if not (s[1] is String):
+			player.yaw = s[1]
+			player.pitch = s[2]
 		for i in 40:
 			await get_tree().process_frame
+			if s[1] is String:   # aim at the moon (zoomed in so the face shows)
+				var d: Vector3 = sky.moon_dir
+				player.yaw = atan2(-d.x, -d.z)
+				player.pitch = asin(d.y)
 		var img := get_viewport().get_texture().get_image()
 		var path: String = OS.get_cmdline_user_args()[OS.get_cmdline_user_args().find("--shot") + 1] if OS.get_cmdline_user_args().size() > 1 else "user://"
 		img.save_png(path.path_join("shot_%s.png" % s[4]))

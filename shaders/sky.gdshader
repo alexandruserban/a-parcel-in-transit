@@ -18,19 +18,55 @@ uniform float cloud_time = 0.0;
 uniform vec3 cloud_lit : source_color = vec3(1.0, 1.0, 1.0);
 uniform vec3 cloud_shade : source_color = vec3(0.6, 0.65, 0.72);
 
-vec3 moon_face(vec3 d, vec3 md) {
+// The web moon's own hash and value noise (sky.js), so the face comes out the same
+float m_hash2(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+float m_vnoise(vec2 p) {
+	vec2 i = floor(p), f = fract(p); f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(m_hash2(i), m_hash2(i + vec2(1.0, 0.0)), f.x), mix(m_hash2(i + vec2(0.0, 1.0)), m_hash2(i + vec2(1.0, 1.0)), f.x), f.y);
+}
+// Crater: dark floor, bright raised rim, faint ejecta halo. q = disc coords, c = centre, r = radius
+float crater(vec2 q, vec2 c, float r) {
+	float d = length(q - c) / r;
+	return -0.16 * (1.0 - smoothstep(0.55, 0.95, d)) + 0.22 * smoothstep(0.7, 0.95, d) * (1.0 - smoothstep(0.95, 1.2, d))
+		+ 0.05 * (1.0 - smoothstep(1.0, 2.2, d));
+}
+// Moon face: maria (dark seas), highlands, craters, ray systems, limb darkening. Albedo in rgb, coverage in a
+vec4 moon_face(vec3 d, vec3 md) {
 	vec3 right = normalize(cross(md, vec3(0.0, 1.0, 0.0)));
 	vec3 up = cross(right, md);
 	vec2 q = vec2(dot(d, right), dot(d, up)) / 0.0205;
 	float r = length(q);
+	if (r > 1.03) return vec4(0.0);
 	float z = sqrt(max(0.0, 1.0 - r * r));
-	vec2 sp = q / (0.6 + 0.4 * z);
-	float m = vnoise(sp * 2.6 + vec2(4.0)) * 0.55 + vnoise(sp * 5.5 + vec2(9.0)) * 0.3 + vnoise(sp * 12.0) * 0.15;
-	m += 0.3 * exp(-dot(sp - vec2(-0.2, 0.25), sp - vec2(-0.2, 0.25)) * 3.0);
-	float seas = smoothstep(0.62, 0.75, m);
-	float alb = 0.92 - 0.3 * seas + (vnoise(sp * 22.0) - 0.5) * 0.12;
-	alb *= 0.62 + 0.38 * pow(z, 0.45);
-	return vec3(0.9, 0.9, 0.88) * alb;
+	vec2 sp = q / (0.6 + 0.4 * z);   // fake sphere wrap: features squeeze towards the limb
+	float n = m_vnoise(sp * 2.6 + 4.0) * 0.55 + m_vnoise(sp * 5.5 + 9.0) * 0.3 + m_vnoise(sp * 12.0 + 2.0) * 0.15;
+	float bias = 0.34 * exp(-dot(sp - vec2(-0.2, 0.25), sp - vec2(-0.2, 0.25)) * 3.0)
+		+ 0.22 * exp(-dot(sp - vec2(0.35, 0.2), sp - vec2(0.35, 0.2)) * 9.0)
+		+ 0.2 * exp(-dot(sp - vec2(0.0, -0.25), sp - vec2(0.0, -0.25)) * 8.0)
+		+ 0.18 * exp(-dot(sp - vec2(-0.6, -0.1), sp - vec2(-0.6, -0.1)) * 10.0) - 0.12 * smoothstep(0.3, 0.9, -sp.y);
+	float m = n + bias;
+	float seas = smoothstep(0.64, 0.76, m);
+	float alb = 0.92 - 0.3 * seas - 0.08 * smoothstep(0.78, 0.95, m)
+		+ (m_vnoise(sp * 20.0) - 0.5) * 0.1 * (1.0 - seas * 0.6) + (m_vnoise(sp * 45.0) - 0.5) * 0.06;
+	alb += 0.8 * crater(sp, vec2(0.12, -0.62), 0.07);   // a bright young crater in the southern highlands
+	alb += 0.5 * crater(sp, vec2(-0.48, 0.05), 0.06);
+	alb += 0.5 * crater(sp, vec2(0.55, -0.25), 0.05);
+	alb += 0.4 * crater(sp, vec2(-0.2, -0.5), 0.05);
+	alb += 0.4 * crater(sp, vec2(0.62, 0.45), 0.04);
+	alb += 0.6 * crater(sp, vec2(-0.32, 0.38), 0.035);  // a bright crater inside the seas
+	alb += 0.4 * crater(sp, vec2(0.35, -0.55), 0.035);
+	alb += 0.4 * crater(sp, vec2(-0.7, 0.4), 0.04);
+	// Bright rays from the young crater
+	vec2 rv = sp - vec2(0.12, -0.62);
+	float ang = atan(rv.y, rv.x);
+	alb += 0.09 * pow(m_vnoise(vec2(ang * 7.0, 1.0)), 5.0) * (1.0 - smoothstep(0.08, 1.1, length(rv)));
+	// Small pocks everywhere
+	vec2 cell = floor(sp * 16.0), f = fract(sp * 16.0) - 0.5;
+	float h = m_hash2(cell);
+	float pd = length(f - (vec2(m_hash2(cell + 3.1), m_hash2(cell + 7.7)) - 0.5) * 0.5) / (0.12 + 0.2 * h);
+	alb += step(0.78, h) * (1.0 - seas * 0.7) * (-0.05 * (1.0 - smoothstep(0.5, 0.9, pd)) + 0.035 * smoothstep(0.75, 0.95, pd) * (1.0 - smoothstep(0.95, 1.15, pd)));
+	alb *= 0.62 + 0.38 * pow(z, 0.45);   // limb darkening
+	return vec4(vec3(0.9, 0.9, 0.88) * alb, 1.0 - smoothstep(0.97, 1.03, r));
 }
 
 void sky() {
@@ -56,9 +92,9 @@ void sky() {
 	// Moon disc
 	vec3 md = normalize(moon_dir);
 	float mm = max(dot(d, md), 0.0);
-	if (mm > 0.9997 && moon_vis > 0.0) {
-		float a = smoothstep(0.99975, 0.99979, mm);
-		col = mix(col, moon_face(d, md) * 1.6, a * moon_vis);
+	if (mm > 0.999 && moon_vis > 0.0) {
+		vec4 mf = moon_face(d, md);
+		col = mix(col, pow(mf.rgb, vec3(2.2)) * 0.85, mf.a * moon_vis);   // the web writes the face in display space, untonemapped
 	}
 	col += vec3(0.25, 0.3, 0.45) * pow(mm, 60.0) * 0.25 * moon_vis;
 
