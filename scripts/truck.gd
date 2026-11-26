@@ -26,6 +26,16 @@ var head_mat: StandardMaterial3D
 var tail_mat: StandardMaterial3D
 var beam: SpotLight3D
 var cab_light: OmniLight3D
+var steer_wheel: Node3D
+var ind_mat: Array = []
+var reverse_mat: StandardMaterial3D
+var marker_mat: StandardMaterial3D
+var wipers: Array[Node3D] = []
+var wipers_on := false
+var _wipe_phase := 0.0
+var _blink := 0.0
+var steer_tilt := Basis()
+const WHEEL_RATIO := 4.5   # steering-wheel turn per radian of road-wheel steer
 var body: AnimatableBody3D
 var door_item := {}
 var rear_item := {}
@@ -65,7 +75,7 @@ func _build_model() -> void:
 	var orange := _std(Color("#e8731c"), 0.4, 0.15)
 	var dark := _std(Color("#1f2124"), 0.6, 0.3)
 	# see-through windscreen and side windows (from the cab you look out through them)
-	var glass := _std(Color(Color("#182028"), 0.35), 0.05, 0.6)
+	var glass := _std(Color(Color("#9db3bf"), 0.16), 0.03, 0.2)   # clear enough to see the cab inside
 	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	glass.cull_mode = BaseMaterial3D.CULL_DISABLED
 	var rubber := _std(Color("#151515"), 0.9)
@@ -81,6 +91,10 @@ func _build_model() -> void:
 	tail_mat.emission = Color("#ff2a1a")
 	tail_mat.emission_energy_multiplier = 0.3
 	# Livery: one copy of the picture over each side of the cargo box (the batch's UVs are in metres)
+	var chrome := _std(Color("#d5d8dc"), 0.2, 0.95)
+	ind_mat = [_lamp(Color("#ffb300")), _lamp(Color("#ffb300"))]   # left, right indicators
+	reverse_mat = _lamp(Color("#ffffff"))
+	marker_mat = _lamp(Color("#ffa000"))
 	var livery := _std(Color.WHITE, 0.4, 0.1)
 	livery.albedo_texture = world.tex("livery_col")
 	livery.uv1_scale = Vector3(1.0 / 5.2, 1.0 / 2.55, 1.0)
@@ -104,8 +118,33 @@ func _build_model() -> void:
 	# (faces that would cut through the cab interior are left out: _cab_interior lines it from inside)
 	B.call(1.62, 1.25, 2.3, [null, paint, null, paint, paint, paint], 2.31, 1.45, 0)    # cab, below the windows
 	B.call(0.48, 1.25, 2.3, [paint, null, paint, paint, paint, paint], 3.36, 1.45, 0)   # bonnet
-	B.call(1.7, 0.95, 2.3, [paint, paint, paint, null, paint, paint], 2.35, 2.55, 0)
+	# upper cab as panels with real openings for the windscreen and side windows (see-through from outside)
+	var UX0 := 1.5
+	var UX1 := 3.2
+	var UY0 := 2.075
+	var UY1 := 3.025
+	var UZ := 1.15
+	var pq := func(a: Vector3, c: Vector3, d: Vector3, e: Vector3, n: Vector3) -> void:
+		b.quad(I, a, c, d, e, paint, n, 1.0, true)
+	pq.call(Vector3(UX0, UY1, -UZ), Vector3(UX1, UY1, -UZ), Vector3(UX1, UY1, UZ), Vector3(UX0, UY1, UZ), Vector3.UP)
+	var front_panel := func(z0: float, z1: float, y0: float, y1: float) -> void:
+		pq.call(Vector3(UX1, y0, z0), Vector3(UX1, y0, z1), Vector3(UX1, y1, z1), Vector3(UX1, y1, z0), Vector3.RIGHT)
+	front_panel.call(-UZ, UZ, UY0, 2.1)
+	front_panel.call(-UZ, UZ, 2.9, UY1)
+	front_panel.call(-UZ, -0.98, 2.1, 2.9)
+	front_panel.call(0.98, UZ, 2.1, 2.9)
+	for s in [-1.0, 1.0]:
+		var z: float = s * UZ
+		var n := Vector3(0, 0, s)
+		var side_panel := func(x0: float, x1: float, y0: float, y1: float) -> void:
+			pq.call(Vector3(x0, y0, z), Vector3(x1, y0, z), Vector3(x1, y1, z), Vector3(x0, y1, z), n)
+		side_panel.call(UX0, UX1, UY0, 2.18)
+		side_panel.call(UX0, UX1, 2.82, UY1)
+		side_panel.call(UX0, 1.98, 2.18, 2.82)
+		side_panel.call(2.92, UX1, 2.18, 2.82)
 	B.call(1.3, 0.5, 2.2, paint, 2.0, 3.1, 0, -0.25)
+	for k in 3:   # amber marker lights along the top of the cab
+		B.call(0.06, 0.06, 0.16, marker_mat, 2.62, 3.24, (k - 1) * 0.45, -0.25)
 	B.call(2.12, 0.16, 2.32, [orange, orange, null, null, orange, orange], 2.55, 1.6, 0)
 	B.call(5.22, 0.16, 2.48, orange, -1.1, 1.15, 0)
 	B.call(0.05, 0.85, 2.05, glass, 3.25, 2.5, 0, 0.18)
@@ -116,13 +155,20 @@ func _build_model() -> void:
 		B.call(0.07, 0.04, 1.45, grille, 3.64, 1.05 + k * 0.13, 0)
 	# lights, mirrors, step, mud flaps
 	for s in [-1.0, 1.0]:
-		B.call(0.06, 0.22, 0.4, head_mat, 3.62, 1.35, s * 0.88)
+		var lamp_axis := Basis(Vector3.BACK, -PI / 2)   # cylinders facing forward (+x)
+		b.cylinder(Transform3D(lamp_axis, Vector3(3.6, 1.35, s * 0.82)), Vector3.ZERO, 0.17, 0.17, 0.05, 20, chrome)
+		b.cylinder(Transform3D(lamp_axis, Vector3(3.63, 1.35, s * 0.82)), Vector3.ZERO, 0.14, 0.14, 0.03, 20, head_mat)
+		B.call(0.05, 0.12, 0.16, ind_mat[0 if s < 0 else 1], 3.62, 1.35, s * 1.06)      # front indicator
 		B.call(0.05, 0.3, 0.14, tail_mat, -3.75, 1.0, s * 1.08)
+		B.call(0.05, 0.12, 0.14, ind_mat[0 if s < 0 else 1], -3.75, 1.24, s * 1.08)     # rear indicator
+		B.call(0.05, 0.1, 0.14, reverse_mat, -3.75, 0.8, s * 1.08)                      # reversing light
+		B.call(0.06, 0.06, 0.12, ind_mat[0 if s < 0 else 1], 2.0, 1.45, s * 1.17)       # side repeater
 		B.call(0.06, 0.3, 0.16, dark, 3.0, 2.45, s * 1.32)
 		B.call(0.4, 0.06, 0.25, dark, 2.6, 0.55, s * 1.2)
 		B.call(1.0, 0.7, 0.05, dark, -2.3, 1.0, s * 1.3)
 	_cab_interior(b)
 	b.commit(self)
+	_build_wipers(dark)
 
 	# wheels: steerable fronts, dual rears
 	var tyre := CylinderMesh.new()
@@ -240,11 +286,19 @@ func _cab_interior(b) -> void:
 	wheel.outer_radius = 0.22
 	wheel.rings = 28
 	wheel.ring_segments = 8
-	b.mesh(Transform3D(tilt * Basis(Vector3.BACK, PI / 2), hub), wheel, dash, false)
+	# the rim, spokes and boss are their own node, so the wheel turns with the steering (_sync)
+	steer_wheel = Node3D.new()
+	steer_wheel.transform = Transform3D(tilt, hub)
+	steer_tilt = tilt
+	add_child(steer_wheel)
+	var wb := Batch.new()
+	wb.mesh(Transform3D(Basis(Vector3.BACK, PI / 2), Vector3.ZERO), wheel, dash, false)
 	for k in 3:   # spokes
 		var a := k * TAU / 3 + PI / 2
-		b.box(Transform3D(tilt * Basis(Vector3.RIGHT, a), hub), Vector3(0, 0.1, 0), Vector3(0.025, 0.19, 0.04), dash, 1.0, false)
-	b.cylinder(Transform3D(tilt * Basis(Vector3.BACK, PI / 2), hub), Vector3.ZERO, 0.06, 0.06, 0.05, 12, dash, true, 1.0, false)
+		wb.box(Transform3D(Basis(Vector3.RIGHT, a), Vector3.ZERO), Vector3(0, 0.1, 0), Vector3(0.025, 0.19, 0.04), dash, 1.0, false)
+	wb.cylinder(Transform3D(Basis(Vector3.BACK, PI / 2), Vector3.ZERO), Vector3.ZERO, 0.06, 0.06, 0.05, 12, dash, true, 1.0, false)
+	wb.box(Transform3D.IDENTITY, Vector3(-0.012, 0.205, 0), Vector3(0.03, 0.03, 0.06), chrome, 1.0, false)   # a marker at the top of the rim
+	wb.commit(steer_wheel)
 	b.cylinder(Transform3D(tilt * Basis(Vector3.BACK, -PI / 2), hub), Vector3.ZERO, 0.035, 0.045, 0.42, 10, dash, false, 1.0, false)
 	# centre console with a gear selector, and two seats behind you
 	b.box(I, Vector3(2.35, 1.3, 0.0), Vector3(0.9, 0.6, 0.32), dash, 1.0, false)
@@ -264,6 +318,37 @@ func _cab_interior(b) -> void:
 	cab_light.position = Vector3(2.3, 2.85, 0)
 	cab_light.visible = false
 	add_child(cab_light)
+
+
+## A lamp lens: its colour, lit by emission (0 = off)
+func _lamp(col: Color) -> StandardMaterial3D:
+	var m := _std(col.darkened(0.45), 0.25)
+	m.emission_enabled = true
+	m.emission = col
+	m.emission_energy_multiplier = 0.0
+	return m
+
+
+## Two wipers on the windscreen, pivoting at its foot; they lie flat along the bottom when parked
+func _build_wipers(dark: Material) -> void:
+	var glass_frame := Basis(Vector3.BACK, 0.18)        # the windscreen leans back by this much
+	for pz in [-0.5, 0.45]:
+		var foot := Vector3(3.25, 2.5, 0) + glass_frame * Vector3(0, -0.4, 0)
+		var w := Node3D.new()
+		w.transform = Transform3D(glass_frame, foot + glass_frame * Vector3(0.05, 0, pz))
+		add_child(w)
+		var wb := Batch.new()
+		wb.cylinder(Transform3D(Basis(Vector3.BACK, -PI / 2), Vector3.ZERO), Vector3.ZERO, 0.035, 0.035, 0.04, 10, dark)
+		wb.box(Transform3D.IDENTITY, Vector3(0, 0, 0.36), Vector3(0.02, 0.025, 0.72), dark, 1.0, false)    # arm
+		wb.box(Transform3D.IDENTITY, Vector3(0.012, 0, 0.62), Vector3(0.015, 0.03, 0.5), dark, 1.0, false)  # blade
+		wb.commit(w)
+		w.set_meta("rest", w.transform)
+		wipers.append(w)
+
+
+func toggle_wipers() -> void:
+	wipers_on = not wipers_on
+	game.sfx.play("click")
 
 
 func _part(parent: Node3D, mesh: Mesh, mat: Material, xf: Transform3D) -> void:
@@ -504,6 +589,24 @@ func _physics_process(dt: float) -> void:
 	cab_light.visible = driving and view == "cab"
 	beam.light_energy = 3.2
 	head_mat.emission_energy_multiplier = (2.5 if night else 0.6) if driving else 0.15
+	# indicators blink on the side you're steering towards; hazards blink both while parked with cargo aboard
+	_blink += dt
+	var on := fmod(_blink, 0.8) < 0.4
+	var turn_l := driving and steer > 0.12
+	var turn_r := driving and steer < -0.12
+	(ind_mat[0] as StandardMaterial3D).emission_energy_multiplier = 3.0 if turn_l and on else 0.0
+	(ind_mat[1] as StandardMaterial3D).emission_energy_multiplier = 3.0 if turn_r and on else 0.0
+	reverse_mat.emission_energy_multiplier = 2.5 if driving and speed < -0.3 else 0.0
+	marker_mat.emission_energy_multiplier = 2.0 if driving and night else 0.0
+	# wipers sweep back and forth when switched on, or by themselves in grey weather while you drive
+	var wiping: bool = wipers_on or (driving and game.sky.weather > 0.5)
+	if wiping or _wipe_phase > 0.0:
+		_wipe_phase += dt * 2.6
+		if not wiping and fmod(_wipe_phase, TAU) < dt * 2.6 * 1.5:
+			_wipe_phase = 0.0   # finish the stroke, then park
+		var a := -1.65 * (0.5 - 0.5 * cos(_wipe_phase))
+		for w in wipers:
+			w.transform = (w.get_meta("rest") as Transform3D) * Transform3D(Basis(Vector3.RIGHT, a), Vector3.ZERO)
 	tail_mat.emission_energy_multiplier = 2.2 if braking else (0.9 if driving and night else 0.25)
 
 	# interaction points follow the truck
@@ -530,6 +633,8 @@ func _sync() -> void:
 	for w in wheels:
 		w.pivot.rotation.y = steer if w.steerable else 0.0
 		w.spin.rotation.z = wheel_spin
+	if steer_wheel != null:   # turning left winds the wheel anticlockwise, as the driver sees it
+		steer_wheel.basis = steer_tilt * Basis(Vector3.RIGHT, -steer * WHEEL_RATIO)
 
 
 func _update_camera(dt: float) -> void:
@@ -553,5 +658,9 @@ func _update_camera(dt: float) -> void:
 
 
 func drive_text() -> String:
-	var e := "[E] Unload %d parcels into the depot" % cargo.size() if in_depot() and not cargo.is_empty() else "[E] Get out"
-	return "%d km/h - Cargo %d/%d - %s - [V] Camera" % [roundi(absf(speed) * 3.6), cargo.size(), CAPACITY, e]
+	var unload := in_depot() and not cargo.is_empty()
+	if game.mobile:   # touch buttons: Use, Cam, Horn, Wipers
+		var u := "Use: unload %d parcels" % cargo.size() if unload else "Use: get out"
+		return "%d km/h - Cargo %d/%d - %s" % [roundi(absf(speed) * 3.6), cargo.size(), CAPACITY, u]
+	var e := "[E] Unload %d parcels into the depot" % cargo.size() if unload else "[E] Get out"
+	return "%d km/h - Cargo %d/%d - %s - [V] Camera - [R] Wipers" % [roundi(absf(speed) * 3.6), cargo.size(), CAPACITY, e]

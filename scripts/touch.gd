@@ -18,6 +18,10 @@ var root: Control
 var joy_base: Panel
 var joy_knob: Panel
 var drop_btn: Control
+var cam_btn: Control
+var horn_btn: Control
+var wipe_btn: Control
+var walk_btns: Array = []
 
 
 func _ready() -> void:
@@ -37,6 +41,10 @@ func _ready() -> void:
 	_button("crouch", "Crouch", Vector2(-BTN - 24, -BTN * 2.6 - 60), BTN)
 	_button("light", "Light", Vector2(-BTN * 2.2 - 40, -BTN * 2.45 - 60), BTN * 0.8)
 	drop_btn = _button("drop", "Drop", Vector2(-BTN * 3.5 - 56, -BTN - 30), BTN)
+	# while driving the truck, these replace Jump / Crouch / Light / Drop
+	cam_btn = _button("cam", "Cam", Vector2(-BTN * 2.6 - 40, -BTN - 30), BTN)
+	horn_btn = _button("horn", "Horn", Vector2(-BTN - 24, -BTN * 2.6 - 60), BTN)
+	wipe_btn = _button("wipe", "Wipers", Vector2(-BTN * 2.2 - 40, -BTN * 2.45 - 60), BTN * 0.8)
 	_button("pause", "II", Vector2(-BTN * 0.7 - 210, 12), BTN * 0.7, true)
 
 
@@ -89,6 +97,9 @@ func _press(action: String) -> void:
 		"crouch": p.toggle_crouch()
 		"light": p.toggle_flashlight()
 		"drop": game.drop_one()
+		"cam": game.truck.toggle_view()
+		"horn": game.truck.horn()
+		"wipe": game.truck.toggle_wipers()
 		"pause": game.pause()
 
 
@@ -150,7 +161,17 @@ func _flash(action: String) -> void:
 func _process(_delta: float) -> void:
 	if game == null or game.player == null:
 		return
-	drop_btn.visible = game.backpack.size() > 0
+	var driving: bool = game.truck.driving
+	if walk_btns.is_empty():
+		for bt in buttons:
+			if bt.action in ["jump", "crouch", "light"]:
+				walk_btns.append(bt.node)
+	for n in walk_btns:
+		n.visible = not driving
+	cam_btn.visible = driving
+	horn_btn.visible = driving
+	wipe_btn.visible = driving
+	drop_btn.visible = game.backpack.size() > 0 and not driving
 	# Analog move: walk slower when the stick is only pushed part-way; well past the rim sprints
 	var p = game.player
 	p.move_input = joy_vec.limit_length(1.0)

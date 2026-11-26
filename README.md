@@ -40,7 +40,7 @@ On a phone the game shows touch controls: a joystick under your left thumb (push
 | Skip time / weather | N / B |
 | Map / sound | M / K |
 | Menu | Esc |
-| Truck: drive / brake / horn / camera / get out | WASD / Space / Q / V / E |
+| Truck: drive / brake / horn / camera / wipers / get out | WASD / Space / Q / V / R / E |
 
 ## How it is built
 

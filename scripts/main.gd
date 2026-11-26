@@ -215,6 +215,9 @@ func _unhandled_input(event: InputEvent) -> void:
 				truck.horn()
 		KEY_V:
 			truck.toggle_view()
+		KEY_R:
+			if truck.driving:
+				truck.toggle_wipers()
 		KEY_F:
 			player.toggle_flashlight()
 		KEY_G:
@@ -626,8 +629,9 @@ func _drive_test() -> void:
 	var img := get_viewport().get_texture().get_image()
 	var args := OS.get_cmdline_user_args()
 	img.save_png(args[args.find("--drive") + 1].path_join("shot_driving.png"))
-	truck.toggle_view()   # the cab view
-	await get_tree().create_timer(0.5).timeout
+	truck.toggle_view()   # the cab view, wipers going
+	truck.wipers_on = true
+	await get_tree().create_timer(0.75).timeout
 	get_viewport().get_texture().get_image().save_png(args[args.find("--drive") + 1].path_join("shot_cab.png"))
 	ev.pressed = false
 	Input.parse_input_event(ev)
@@ -665,6 +669,8 @@ func _screenshot_mode() -> void:
 		[Vector3(0, 0.1, 60), 0.6, 0.55, 11.0, "birds", 40.0],
 		[Vector3(-45, 0.1, 130), 0.0, -0.3, 10.0, "ducks", 40.0],
 		[Vector3(-15, 0.1, 9), 0.99, -0.12, 15.0, "truck", 60.0],
+		[Vector3(-33, 1.7, 6.5), "cam", Vector3(-27.5, 1.9, 2.5), 15.0, "truck_front", 55.0],
+		[Vector3(-24.3, 2.6, 6.2), "cam", Vector3(-26.5, 1.9, 2.0), 15.0, "truck_window", 55.0],
 		[Vector3(0, 0.1, 30), 0.0, -0.05, 14.0, "menu", 75.0],
 		[Vector3(-90, 0.1, -120), 1.30, 0.22, 16.0, "castle_town", 50.0],
 		[Vector3(-90, 0.1, -120), 1.30, 0.22, 22.5, "castle_night", 50.0],
