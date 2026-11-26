@@ -17,6 +17,10 @@ var _pool: Array[AudioStreamPlayer] = []
 var _next := 0
 var _nature_t := 3.0
 var rng := RandomNumberGenerator.new()
+var engine: AudioStreamPlayer
+var _engine_vol := 0.0
+var _engine_target := 0.0
+var _engine_pitch := 1.0
 
 
 func _ready() -> void:
@@ -40,6 +44,9 @@ func _ready() -> void:
 	ambient.stream = streams.wind
 	ambient.volume_db = -20.0
 	add_child(ambient)
+	engine = AudioStreamPlayer.new()
+	engine.stream = streams.engine
+	add_child(engine)
 	_apply_music()
 
 
@@ -96,7 +103,35 @@ func footstep(surface: String, sprint := false) -> void:
 	play(name, -8.0 if sprint else -11.0, rng.randf_range(0.88, 1.12))
 
 
+## Mallard quack, louder the nearer the pond (volume 0..1, like playQuack)
+func quack(volume: float) -> void:
+	if volume > 0.01:
+		play("quack_%d" % rng.randi_range(0, 2), linear_to_db(volume) - 3.0, rng.randf_range(0.95, 1.08))
+
+
+## Diesel engine loop for the truck: pitch and loudness follow speed / throttle (startEngine / setEngine)
+func start_engine() -> void:
+	_engine_target = 0.09
+	if enabled and not engine.playing:
+		engine.play()
+
+
+func set_engine(speed01: float, throttle: bool) -> void:
+	_engine_pitch = 1.0 + speed01 * 1.6 + (0.25 if throttle else 0.0)
+	_engine_target = 0.07 + speed01 * 0.06 + (0.03 if throttle else 0.0)
+
+
+func stop_engine() -> void:
+	_engine_target = 0.0
+
+
 func _process(delta: float) -> void:
+	_engine_vol = move_toward(_engine_vol, _engine_target if enabled else 0.0, delta * 0.4)
+	if engine.playing:
+		engine.pitch_scale = lerpf(engine.pitch_scale, _engine_pitch, minf(1.0, delta * 6.0))
+		engine.volume_db = linear_to_db(maxf(_engine_vol * 7.0, 0.0001))
+		if _engine_vol <= 0.0 and _engine_target <= 0.0:
+			engine.stop()
 	if not enabled or get_tree().paused:
 		return
 	_nature_t -= delta
@@ -129,6 +164,12 @@ func _wav(samples: PackedFloat32Array, loop := false) -> AudioStreamWAV:
 	return w
 
 
+func _amp(s: PackedFloat32Array, k: float) -> PackedFloat32Array:
+	for i in s.size():
+		s[i] *= k
+	return s
+
+
 func _buf(seconds: float) -> PackedFloat32Array:
 	var a := PackedFloat32Array()
 	a.resize(int(seconds * RATE))
@@ -152,6 +193,34 @@ func _tone(s: PackedFloat32Array, start: float, hz: float, dur: float, decay: fl
 		var t := float(i) / RATE
 		var env := exp(-t * decay) * minf(1.0, t * 400.0)
 		s[i0 + i] += gain * env * (sin(TAU * hz * t) + harmonics * sin(TAU * hz * 2.0 * t) + harmonics * 0.4 * sin(TAU * hz * 3.0 * t))
+
+
+## RBJ biquad filters over a whole buffer (Web Audio's BiquadFilterNode)
+func _biquad(s: PackedFloat32Array, kind: String, hz: float, q: float) -> PackedFloat32Array:
+	var w0 := TAU * hz / RATE
+	var alpha := sin(w0) / (2.0 * q)
+	var c := cos(w0)
+	var b0: float; var b1: float; var b2: float
+	if kind == "band":
+		b0 = alpha; b1 = 0.0; b2 = -alpha
+	else:
+		b0 = (1.0 - c) / 2.0; b1 = 1.0 - c; b2 = (1.0 - c) / 2.0
+	var a0 := 1.0 + alpha
+	var a1 := -2.0 * c
+	var a2 := 1.0 - alpha
+	var x1 := 0.0; var x2 := 0.0; var y1 := 0.0; var y2 := 0.0
+	var out := PackedFloat32Array()
+	out.resize(s.size())
+	for i in s.size():
+		var x := s[i]
+		var y := (b0 * x + b1 * x1 + b2 * x2 - a1 * y1 - a2 * y2) / a0
+		x2 = x1; x1 = x; y2 = y1; y1 = y
+		out[i] = y
+	return out
+
+
+static func _saw(ph: float) -> float:
+	return 2.0 * (ph - floorf(ph + 0.5))
 
 
 func _build() -> void:
@@ -207,3 +276,51 @@ func _build() -> void:
 		wind[i] = wind[i] * k + wind[j] * (1.0 - k)
 	wind.resize(wind.size() - fade)
 	streams.wind = _wav(wind, true)
+	# Quacks: 1-3 nasal "waak" bursts, a sawtooth falling in pitch through a narrow band-pass
+	for v in 3:
+		var q := _buf(0.6)
+		var bursts := 1 + v
+		for k in bursts:
+			var t0 := k * (0.16 + rng.randf() * 0.05)
+			var f := 360.0 + rng.randf() * 60.0
+			var ph := 0.0
+			var i0 := int(t0 * RATE)
+			for i in int(0.14 * RATE):
+				var t := float(i) / RATE
+				ph += f * 1.15 * pow(0.8 / 1.15, minf(t / 0.13, 1.0)) / RATE
+				var env := minf(t / 0.015, 1.0) * exp(-maxf(t - 0.015, 0.0) * 50.0)
+				q[i0 + i] += _saw(ph) * env
+		streams["quack_%d" % v] = _wav(_amp(_biquad(q, "band", 1150.0, 4.0), 1.6))
+	# Door: a latch click, then a low-passed creak rising (opening) or falling (closing)
+	for opening in [true, false]:
+		var d := _buf(0.62)
+		var cf := 1800.0 if opening else 1200.0
+		for i in int(0.05 * RATE):
+			var t := float(i) / RATE
+			d[i] += (1.0 if fmod(t * cf, 1.0) < 0.5 else -1.0) * 0.25 * exp(-t * 90.0)
+		var creak := _buf(0.62)
+		var ph := 0.0
+		for i in int(0.55 * RATE):
+			var t := float(i) / RATE
+			var f: float = lerpf(180.0 if opening else 240.0, 260.0 if opening else 150.0, minf(t / 0.45, 1.0))
+			ph += f / RATE
+			var env := minf(t / 0.1, 1.0) * exp(-maxf(t - 0.1, 0.0) * 12.0)
+			creak[int(0.05 * RATE) + i] = _saw(ph) * env * 0.35
+		creak = _biquad(creak, "low", 900.0, 0.707)
+		for i in d.size():
+			d[i] += creak[i]
+		streams["door_open" if opening else "door_close"] = _wav(d)
+	# Horn: two square waves, a major third apart
+	var horn := _buf(0.6)
+	for f in [349.0, 440.0]:
+		for i in horn.size():
+			var t := float(i) / RATE
+			var env := minf(t / 0.03, 1.0) * (1.0 if t < 0.45 else exp(-(t - 0.45) * 40.0))
+			horn[i] += (0.16 if fmod(t * f, 1.0) < 0.5 else -0.16) * env
+	streams.horn = _wav(horn)
+	# Engine: two detuned saws and a square an octave up, low-passed; 10 s so all three loop seamlessly
+	var eng := _buf(10.0)
+	for i in eng.size():
+		var t := float(i) / RATE
+		eng[i] = 0.5 * _saw(38.0 * t) + 0.5 * _saw(38.7 * t) + 0.25 * (1.0 if fmod(76.5 * t, 1.0) < 0.5 else -1.0)
+	streams.engine = _wav(_amp(_biquad(eng, "low", 420.0, 0.707), 0.5), true)

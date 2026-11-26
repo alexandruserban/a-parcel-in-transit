@@ -10,6 +10,7 @@ const Parcels := preload("res://scripts/parcels.gd")
 const Sfx := preload("res://scripts/sfx.gd")
 const Touch := preload("res://scripts/touch.gd")
 const Birds := preload("res://scripts/birds.gd")
+const Ducks := preload("res://scripts/ducks.gd")
 
 const BACKPACK_CAP := 10
 const LAMP_POOL := 14
@@ -31,6 +32,7 @@ var _pool_t := 0.0
 var mobile := false
 var touch
 var birds
+var ducks
 
 
 func _ready() -> void:
@@ -63,6 +65,11 @@ func _ready() -> void:
 	parcels.build()
 	birds = Birds.new()
 	add_child(birds)
+	ducks = Ducks.new()
+	ducks.world = world
+	ducks.sfx = sfx
+	add_child(ducks)
+	ducks.build()
 
 	player = Player.new()
 	player.world = world
@@ -140,6 +147,7 @@ func _process(delta: float) -> void:
 	sky.update(delta, player.global_position)
 	world.set_water_sky(sky.params, sky.sun_dir, sky.moon_dir, sky.moon_amt, sky.daylight(), sky.sun_visibility())
 	birds.update(delta, sky.daylight())
+	ducks.update(delta, player.global_position)
 	var night: bool = sky.is_night()
 	if night != is_night:
 		is_night = night
@@ -366,6 +374,9 @@ func _screenshot_mode() -> void:
 		[Vector3(-3.6, 0.1, 29.4), 0.785, 0.52, 19.0, "lamp"],
 		[Vector3(0, 0.1, 30), "moon", 0.0, 23.0, "moon", 12.0],
 		[Vector3(0, 0.1, 60), 0.6, 0.55, 11.0, "birds", 40.0],
+		[Vector3(-45, 0.1, 130), 0.0, -0.3, 10.0, "ducks", 40.0],
+		[Vector3(-45, 0.1, 130), "duck", 0, 10.0, "drake", 20.0],
+		[Vector3(-45, 0.1, 130), "duck", 1, 10.0, "hen", 20.0],
 		[Vector3(0, 0.1, 30), "moon", 0.0, 23.0, "moonwide", 75.0],
 	]
 	# `--only a,b` renders just the named views
@@ -382,10 +393,18 @@ func _screenshot_mode() -> void:
 			player.pitch = s[2]
 		for i in 40:
 			await get_tree().process_frame
-			if s[1] is String:   # aim at the moon (zoomed in so the face shows)
+			if s[1] == "moon":   # aim at the moon (zoomed in so the face shows)
 				var d: Vector3 = sky.moon_dir
 				player.yaw = atan2(-d.x, -d.z)
 				player.pitch = asin(d.y)
+			elif s[1] == "duck":   # stand by the pond edge nearest a drake and look at it
+				var dd: Dictionary = ducks.lakes[0].sim[s[2]]
+				var dk: Node3D = dd.g
+				var side := Vector3(-sin(dd.heading), 0, cos(dd.heading))   # profile view, from just above the water
+				player.set_physics_process(false)
+				player.set_process(false)
+				var eye := dk.position + side * 2.0 + Vector3(0, 0.6, 0)
+				player.camera.global_transform = Transform3D(Basis(), eye).looking_at(dk.position + Vector3(0, 0.12, 0))
 		var img := get_viewport().get_texture().get_image()
 		var path: String = OS.get_cmdline_user_args()[OS.get_cmdline_user_args().find("--shot") + 1] if OS.get_cmdline_user_args().size() > 1 else "user://"
 		img.save_png(path.path_join("shot_%s.png" % s[4]))

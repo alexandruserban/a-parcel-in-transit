@@ -1189,7 +1189,7 @@ func _park_and_lakes() -> void:
 		trees.build_willow(cx - pier_dir * (rw + 4.2), cz + rd * 0.35)
 		var nm: String = l.name
 		add_interactable(Vector3(cx, 0.8, cz - rd - 0.8), "[E] %s" % nm, "lake",
-			func() -> Dictionary: return {"title": nm, "message": "The ducks and the pier come back to the pond in a later version of the Godot port.", "sound": "click"})
+			func() -> Dictionary: return {"title": nm, "message": "Mallards paddle about the pond, tipping up to dabble for weed.", "sound": "click"})
 
 
 ## Vertical band round a pond from (radial offset, y) a to b; faces into the pond, or out of it
