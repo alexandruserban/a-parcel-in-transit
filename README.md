@@ -8,8 +8,12 @@ A Godot 4.7 port of the Three.js / WebView game in `../tidyup`. It is a first-pe
 - **Directly:** `D:\godot\Godot_v4.7.2-stable_win64.exe --path D:\projects\tidyup-godot`
 - **Smoke test** (headless; picks up a parcel and stores it in the depot):
   `Godot_v4.7.2-stable_win64_console.exe --headless --path . -- --smoke`
-- **Screenshots** of five views (street, church, depot, sunset, night):
+- **Screenshots** of the test views (street, church, depot, night, pond, ducks, truck, castle, rooms and more); add `--only living_room,castle_near` to pick some:
   `Godot_v4.7.2-stable_win64_console.exe --path . -- --shot <folder>`
+- **Drive test** (gets in the truck, drives, steers, brakes, gets out, saves a screenshot):
+  `Godot_v4.7.2-stable_win64_console.exe --path . -- --drive <folder>`
+- **Stairs test** (opens a front door, walks in and up to the landing):
+  `Godot_v4.7.2-stable_win64_console.exe --headless --path . -- --stairs`
 
 ## Android build (phones)
 
@@ -28,12 +32,13 @@ On a phone the game shows touch controls: a joystick under your left thumb (push
 |---|---|
 | Move / look | WASD or arrow keys, mouse |
 | Sprint / jump / crouch | Shift / Space / C |
-| Interact, pick up, store in the depot | E or Enter |
+| Interact, pick up, store in the depot, open doors | E or Enter |
 | Drop a parcel | G |
 | Flashlight | F |
 | Skip time / weather | N / B |
 | Map / sound | M / K |
 | Menu | Esc |
+| Truck: drive / brake / horn / camera / get out | WASD / Space / Q / V / E |
 
 ## How it is built
 
@@ -48,8 +53,12 @@ Then open the project once (or run `--import`) so Godot re-imports them. The `_n
 | File | Ported from | What it does |
 |---|---|---|
 | `scripts/main.gd` | game.js | Game manager: backpack, depot, score, day/night, lamp light pool |
-| `scripts/world.gd` | world.js, oldtown.js, gothic.js, warehouse.js, citywall.js, townsquares.js | Builds the town: streets, 50 houses, church, depot, wall and Nordtor, park, ponds, trees, mountains |
-| `scripts/batch.gd` | `batchStatic()` | Merges static boxes, quads and cylinders into one mesh per material and 96 m chunk |
+| `scripts/world.gd` | world.js, oldtown.js, gothic.js, warehouse.js, citywall.js, townsquares.js | Builds the town: streets, house lots, church, depot, wall and Nordtor, park, ponds, trees, mountains |
+| `scripts/houses.gd` | houses.js, oldtown.js, gothic.js | The houses: shells with windows, doors, stairs, furnished rooms, garages and workshops, roofs, timber frames and Gothic fronts. The unchanging parts are built once and stamped into each house |
+| `scripts/castle.gd` | castle.js | The castle crag, walls, towers, gatehouse, keep, Palas, banner, track and slope forest |
+| `scripts/truck.gd` | truck.js | The drivable delivery truck |
+| `scripts/ducks.gd`, `scripts/birds.gd` | ducks.js, birds.js | Mallards on the ponds; bird flocks and hawks |
+| `scripts/batch.gd` | `batchStatic()` | Merges static geometry into one mesh per material and chunk; also polygons, prisms, arch frames and any mesh, with optional vertex colours |
 | `scripts/trees.gd` | buildTree, randomCard, _buildWillowTree, buildMountains | Card trees (lindens, deciduous, blossom, pines, willows) merged into a few meshes, swaying in the wind; the far mountain forest |
 | `scripts/parcels.gd` | hoard.js, warehouse.js | The parcel piles (one MultiMesh per size), stacking, dropping, automatic depot storage |
 | `scripts/player.gd` | player.js | CharacterBody3D with step-up for kerbs, head bob, footsteps, flashlight, interaction scan |
@@ -69,15 +78,17 @@ Done in the first iteration:
 - The city wall with towers and the Nordtor. Its gates are shut for now.
 - The Parcel Depot, with the full parcel loop: about 1,000 parcels, a 10-parcel backpack, automatic filing, dropping and stacking.
 - Day/night cycle, weather, mountains, forest, minimap and music.
+- Enterable houses: front doors that open, stairs to the upper floor, furnished rooms, room lights, see-through windows that glow at night, garages with four kinds of open workshop.
+- The drivable delivery truck (load the backpack at the back, unload in the depot).
+- The castle on its crag, with the track up from the north gate.
+- Ducks on the ponds, bird flocks and hawks, and the moon's full surface.
 
 Still to port:
 
-- [ ] House interiors (enterable houses, doors, stairs, furniture, room lights)
-- [ ] Delivery truck
 - [ ] Wind gusts that scatter parcels
-- [ ] Moat, drawbridge and bridgehead; the castle on its crag
+- [ ] Moat, drawbridge and bridgehead
 - [ ] Market stalls, fountain coin toss, church bells and clock
-- [ ] Ducks, pier and benches at the ponds; birds, chimney smoke, playground, park flower beds and fountain plaza
+- [ ] Pier and benches at the ponds; chimney smoke, playground, park flower beds and fountain plaza
 - [ ] Billboard clouds (the Godot sky draws its own clouds for now)
-- [ ] Basketball hoops, mailboxes, garage workshops
+- [ ] Basketball hoops, mailboxes
 - [ ] Graphics settings menu (phones use fixed Low-style settings for now)
