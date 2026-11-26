@@ -128,6 +128,9 @@ func _ready() -> void:
 	if "--smoke" in OS.get_cmdline_user_args():
 		_smoke_test()
 		return
+	if "--moat" in OS.get_cmdline_user_args():
+		_moat_test()
+		return
 	if "--gust" in OS.get_cmdline_user_args():
 		_gust_test()
 		return
@@ -191,6 +194,7 @@ func _process(delta: float) -> void:
 	_update_lamp_pool(delta)
 	_update_room_lights()
 	world.house_parts.update(delta)
+	world.moat.update(delta)
 	_update_prompt()
 
 
@@ -491,6 +495,43 @@ func _smoke_test() -> void:
 	get_tree().quit(0 if parcels.stored_total() == 1 else 1)
 
 
+## Walk out through the Nordtor over the drawbridge to the bridgehead and back; raise the bridge; try again
+func _moat_test() -> void:
+	get_tree().paused = false
+	hud.show_menu(false)
+	var walk_to := func(target: Vector3, secs: float) -> void:
+		var t := 0.0
+		while t < secs:
+			var to: Vector3 = target - player.global_position
+			to.y = 0
+			if to.length() < 0.3:
+				break
+			var d := to.normalized().rotated(Vector3.UP, -player.yaw)
+			player.move_input = Vector2(d.x, d.z)
+			await get_tree().physics_frame
+			t += get_physics_process_delta_time()
+		player.move_input = Vector2.ZERO
+	player.global_position = Vector3(0, 0.1, -176)
+	await get_tree().create_timer(0.3).timeout
+	await walk_to.call(Vector3(0, 0, -210), 12.0)
+	print("MOAT: out at z %.1f y %.2f (bridgehead floor is beyond z -203)" % [player.global_position.z, player.global_position.y])
+	await walk_to.call(Vector3(-20, 0, -210), 3.0)
+	print("MOAT: tried to leave the bridgehead sideways: x %.1f" % player.global_position.x)
+	await walk_to.call(Vector3(0, 0, -208), 4.0)
+	await walk_to.call(Vector3(0, 0, -186), 12.0)
+	print("MOAT: back inside at z %.1f" % player.global_position.z)
+	var lever: Dictionary = {}
+	for it in world.interactables:
+		if it.type == "lever":
+			lever = it
+	var res: Dictionary = lever.call.call()
+	print("MOAT: lever: ", res.get("message", ""))
+	await get_tree().create_timer(3.0).timeout
+	await walk_to.call(Vector3(0, 0, -210), 5.0)
+	print("MOAT: with the bridge up, stopped at z %.1f" % player.global_position.z)
+	get_tree().quit()
+
+
 ## Start a gust, screenshot the parcels in the air, check they all land somewhere new
 func _gust_test() -> void:
 	get_tree().paused = false
@@ -623,6 +664,9 @@ func _screenshot_mode() -> void:
 		[Vector3(-15, 0.1, 9), 0.99, -0.12, 15.0, "truck", 60.0],
 		[Vector3(-90, 0.1, -120), 1.30, 0.22, 16.0, "castle_town", 50.0],
 		[Vector3(-90, 0.1, -120), 1.30, 0.22, 22.5, "castle_night", 50.0],
+		[Vector3(0, 0.1, -176), 0.0, -0.05, 15.0, "nordtor_out", 70.0],
+		[Vector3(-30, 9, -230), "cam", Vector3(0, 0, -200), 15.0, "moat_bridge", 65.0],
+		[Vector3(150, 6, -205), "cam", Vector3(196, -1, -197), 15.0, "moat_corner", 65.0],
 		[Vector3(-45, 0.1, -10), PI, 0.5, 22.5, "church_night", 70.0],
 		[Vector3(-22, 0.1, 86), PI / 2 - 0.2, 0.05, 22.5, "park_night", 75.0],
 		[Vector3(-41, 0.1, 89), PI + 0.3, 0.02, 22.5, "park_night2", 75.0],

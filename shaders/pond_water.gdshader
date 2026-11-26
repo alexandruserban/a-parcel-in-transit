@@ -18,6 +18,7 @@ uniform vec2 wind_dir = vec2(0.958, 0.287);
 uniform float wind = 0.25;
 uniform vec2 center = vec2(0.0);
 uniform vec2 axes = vec2(10.0);
+uniform bool ring = false;      // the moat: edge shading follows two square banks at axes.x and axes.y
 
 varying vec3 wpos;
 
@@ -71,8 +72,14 @@ void fragment() {
 	vec3 refl = sky_at(R);
 
 	// the wall and coping are reflected in / shade the water right at the edge
-	float e = length((p - center) / axes);
-	float edge = smoothstep(0.93, 1.0, e);
+	float edge;
+	if (ring) {
+		float mc = max(abs(p.x), abs(p.y));
+		edge = 1.0 - smoothstep(0.0, 2.2, min(mc - axes.x, axes.y - mc));
+	} else {
+		float e = length((p - center) / axes);
+		edge = smoothstep(0.93, 1.0, e);
+	}
 	refl = mix(refl, vec3(0.32, 0.3, 0.27) * (0.15 + 0.85 * day), edge * 0.7);
 	body *= 1.0 - edge * 0.35;
 

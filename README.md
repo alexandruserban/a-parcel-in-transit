@@ -14,6 +14,8 @@ A Godot 4.7 port of the Three.js / WebView game in `../tidyup`. It is a first-pe
   `Godot_v4.7.2-stable_win64_console.exe --path . -- --drive <folder>`
 - **Stairs test** (opens a front door, walks in and up to the landing):
   `Godot_v4.7.2-stable_win64_console.exe --headless --path . -- --stairs`
+- **Gust test** (starts a gust, checks every loose parcel lands somewhere new): `... --path . -- --gust <folder>`
+- **Moat test** (walks out over the drawbridge and back, raises it): `... --headless --path . -- --moat`
 
 ## Android build (phones)
 
@@ -57,6 +59,8 @@ Then open the project once (or run `--import`) so Godot re-imports them. The `_n
 | `scripts/houses.gd` | houses.js, oldtown.js, gothic.js | The houses: shells with windows, doors, stairs, furnished rooms, garages and workshops, roofs, timber frames and Gothic fronts. The unchanging parts are built once and stamped into each house |
 | `scripts/castle.gd` | castle.js | The castle crag, walls, towers, gatehouse, keep, Palas, banner, track and slope forest |
 | `scripts/truck.gd` | truck.js | The drivable delivery truck |
+| `scripts/moat.gd` | moat.js | The moat, drawbridge and bridgehead |
+| `scripts/lights.gd` | (new) | Church tower floodlights and the park's carnival festoons |
 | `scripts/ducks.gd`, `scripts/birds.gd` | ducks.js, birds.js | Mallards on the ponds; bird flocks and hawks |
 | `scripts/batch.gd` | `batchStatic()` | Merges static geometry into one mesh per material and chunk; also polygons, prisms, arch frames and any mesh, with optional vertex colours |
 | `scripts/trees.gd` | buildTree, randomCard, _buildWillowTree, buildMountains | Card trees (lindens, deciduous, blossom, pines, willows) merged into a few meshes, swaying in the wind; the far mountain forest |
@@ -82,11 +86,12 @@ Done in the first iteration:
 - The drivable delivery truck (load the backpack at the back, unload in the depot).
 - The castle on its crag, with the track up from the north gate.
 - Ducks on the ponds, bird flocks and hawks, and the moon's full surface.
+- Wind gusts that scatter the loose parcels across town.
+- The moat, the drawbridge (lever in the Nordtor passage) and the bridgehead you can walk out to.
+- Night lighting beyond the web version: the floodlit castle, the church tower, and carnival lights in the Stadtpark.
 
 Still to port:
 
-- [ ] Wind gusts that scatter parcels
-- [ ] Moat, drawbridge and bridgehead
 - [ ] Market stalls, fountain coin toss, church bells and clock
 - [ ] Pier and benches at the ponds; chimney smoke, playground, park flower beds and fountain plaza
 - [ ] Billboard clouds (the Godot sky draws its own clouds for now)

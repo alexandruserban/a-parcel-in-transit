@@ -10,9 +10,12 @@ const Trees := preload("res://scripts/trees.gd")
 const Castle := preload("res://scripts/castle.gd")
 const Houses := preload("res://scripts/houses.gd")
 const Lights := preload("res://scripts/lights.gd")
+const Moat := preload("res://scripts/moat.gd")
 const WATER_Y := -0.32        # pond water level, below the lawn (world.js WATER_Y)
 
 const FENCE := 185.0          # inner face of the city wall
+const MOAT_M0 := FENCE + 6.0  # inner and outer banks of the moat (moat.gd)
+const MOAT_M1 := FENCE + 18.0
 const GROUND := 300.0
 const NS_HALF := 5.5
 const EW_HALF := 5.0
@@ -50,7 +53,9 @@ var trees: Trees
 var tree_detail := 1.0       # leaf clusters in the big trees (GFX.treeDetail: 0.5 on phones)
 var water_mats: Array[ShaderMaterial] = []
 var night_glows: Array = []
-var night_lights: Array = []          # Light3Ds shown only at night (castle, church, park)           # [{mat, energy}] emissive materials that light up at night
+var night_lights: Array = []
+var outer_zones: Array = []           # Rect2s outside the wall the player may walk on (gate passage, bridge, bridgehead)
+var moat          # Light3Ds shown only at night (castle, church, park)           # [{mat, energy}] emissive materials that light up at night
 var mats := {}
 var b: Batch
 var house_parts: Houses
@@ -83,6 +88,8 @@ func build() -> void:
 	_squares()
 	_park_and_lakes()
 	_city_wall()
+	moat = Moat.new()
+	moat.build(self)
 	_street_lights()
 	_avenue_trees()
 	_vegetation()
@@ -614,7 +621,8 @@ func _ground_with_ponds(G: float) -> void:
 				if h.encloses(r):
 					skip = true
 			if not skip:
-				flat(r, 0.0, mats.grass)
+				for piece in _minus_moat(r):
+					flat(piece, 0.0, mats.grass)
 			z += cell
 		x += cell
 	# Fill from the pond's edge (just inside the coping) out to the rectangle of left-out cells
@@ -642,6 +650,46 @@ func _ground_with_ponds(G: float) -> void:
 			var q0 := _ray_rect(cx, cz, t0, hr)
 			var q1 := _ray_rect(cx, cz, t1, hr)
 			b.quad(Transform3D.IDENTITY, p0, q0, q1, p1, mats.grass, Vector3.UP, 1.0, false)
+
+
+## A ground cell with the moat ring cut out of it (up to five rectangles)
+static func _minus_moat(r: Rect2) -> Array:
+	var outer := Rect2(-MOAT_M1, -MOAT_M1, 2 * MOAT_M1, 2 * MOAT_M1)
+	if not r.intersects(outer):
+		return [r]
+	var inner := Rect2(-MOAT_M0, -MOAT_M0, 2 * MOAT_M0, 2 * MOAT_M0)
+	if inner.encloses(r):
+		return [r]
+	var out: Array = []
+	var ins := r.intersection(inner)
+	if ins.size.x > 0.01 and ins.size.y > 0.01:
+		out.append(ins)
+	var x0 := r.position.x
+	var x1 := r.end.x
+	var z0 := r.position.y
+	var z1 := r.end.y
+	if x0 < -MOAT_M1:
+		out.append(Rect2(x0, z0, minf(x1, -MOAT_M1) - x0, z1 - z0))
+	if x1 > MOAT_M1:
+		out.append(Rect2(maxf(x0, MOAT_M1), z0, x1 - maxf(x0, MOAT_M1), z1 - z0))
+	var mx0 := maxf(x0, -MOAT_M1)
+	var mx1 := minf(x1, MOAT_M1)
+	if mx1 - mx0 > 0.01:
+		if z0 < -MOAT_M1:
+			out.append(Rect2(mx0, z0, mx1 - mx0, minf(z1, -MOAT_M1) - z0))
+		if z1 > MOAT_M1:
+			out.append(Rect2(mx0, maxf(z0, MOAT_M1), mx1 - mx0, z1 - maxf(z0, MOAT_M1)))
+	return out.filter(func(q): return q.size.x > 0.01 and q.size.y > 0.01)
+
+
+## May the player stand here? Inside the wall, or on the way out to the bridgehead
+func can_stand(x: float, z: float, limit: float) -> bool:
+	if absf(x) <= limit and absf(z) <= limit:
+		return true
+	for zr in outer_zones:
+		if (zr as Rect2).has_point(Vector2(x, z)):
+			return true
+	return false
 
 
 static func _ray_rect(cx: float, cz: float, t: float, r: Rect2) -> Vector3:
@@ -1225,12 +1273,7 @@ func _city_wall() -> void:
 		b.tri(I, Vector3(-2.5, 6.2, zf), Vector3(2.5, 6.2, zf), Vector3(0, 7.5, zf), mats.recess, o)
 	bx(I, 0, 6.85, gzc, 5.0, 1.3, gd - 0.1, mats.recess, false, false)
 	bx(I, 0, 0.03, gzc, 5.0, 0.04, gd, mats.cobble, false, false)
-	# shut oak gates (the moat and drawbridge come later)
-	bx(I, 0, 3.1, gz0 + 0.6, 5.0, 6.2, 0.3, mats.dark_oak, true)
-	for k in 6:
-		bx(I, 0, 0.6 + k * 1.0, gz0 + 0.42, 5.0, 0.1, 0.05, mats.iron, false, false)
-	add_interactable(Vector3(0, 1.6, gz0 + 1.2), "[E] Try the Nordtor gates", "gate",
-		func() -> Dictionary: return {"title": "Nordtor", "message": "The gates are barred. The moat, the drawbridge and the castle on its crag come in a later version of the Godot port.", "sound": "click"})
+	# the gate passage is open: it leads out onto the drawbridge (moat.gd)
 	# spire and corner turrets
 	var ov := 0.5
 	var apex := Vector3(0, GH + 15, gzc)
@@ -1496,7 +1539,8 @@ func _mountains() -> void:
 			var a := TAU * i / NA
 			var x := cos(a) * r
 			var z := sin(a) * r
-			pts[j * NA + i] = Vector3(x, mountain_height(x, z), z)
+			var hgt := mountain_height(x, z) if maxf(absf(x), absf(z)) > 212.0 else -3.0
+			pts[j * NA + i] = Vector3(x, hgt, z)
 	var st := SurfaceTool.new()
 	st.begin(Mesh.PRIMITIVE_TRIANGLES)
 	var normals := PackedVector3Array()

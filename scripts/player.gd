@@ -32,6 +32,7 @@ var current = null          # Dictionary: world interactable, or a parcel record
 var move_input := Vector2.ZERO   # touch joystick (x strafe, y forward/back, -1..1)
 var touch_sprint := false
 var mobile := false
+var _last_ok := Vector2.INF
 
 
 func _ready() -> void:
@@ -135,8 +136,13 @@ func _physics_process(delta: float) -> void:
 		if is_on_floor() and not was_floor and vy < -3.0:
 			game.sfx.play("land", -6.0)
 	_keep_out_of_lakes()
+	# stay inside the wall, except on the way out through the Nordtor to the bridgehead
 	var p := global_position
-	if absf(p.x) > MAP_LIMIT or absf(p.z) > MAP_LIMIT:
+	if world.can_stand(p.x, p.z, MAP_LIMIT):
+		_last_ok = Vector2(p.x, p.z)
+	elif _last_ok != Vector2.INF:
+		global_position = Vector3(_last_ok.x, p.y, _last_ok.y)
+	else:
 		global_position = Vector3(clampf(p.x, -MAP_LIMIT, MAP_LIMIT), p.y, clampf(p.z, -MAP_LIMIT, MAP_LIMIT))
 
 	# Eye height, head bob and footsteps
