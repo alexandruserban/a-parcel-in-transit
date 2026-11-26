@@ -1,4 +1,4 @@
-# Parcel Run (Godot)
+# Parcels in Transit (Godot)
 
 A Godot 4.7 port of the Three.js / WebView game in `../tidyup`. It is a first-person old-town explorer: the town is buried in parcels, and you carry them to the depot.
 
@@ -22,8 +22,8 @@ A Godot 4.7 port of the Three.js / WebView game in `../tidyup`. It is a first-pe
 The Android export preset builds an arm64 APK, landscape and full screen. Building it needs the Godot 4.7.2 export templates, the Android SDK and a JDK (set under Editor Settings > Export > Android).
 
 ```
-Godot_v4.7.2-stable_win64_console.exe --headless --path . --export-debug "Android" export/ParcelRun.apk
-adb install -r export/ParcelRun.apk
+Godot_v4.7.2-stable_win64_console.exe --headless --path . --export-debug "Android" export/ParcelsInTransit.apk
+adb install -r export/ParcelsInTransit.apk
 ```
 
 On a phone the game shows touch controls: a joystick under your left thumb (push past the rim to sprint), drag on the right side to look, and Use / Jump / Crouch / Light / Drop buttons. II or the back button pauses. Phones get lighter graphics, like the web version's Low preset. Run the desktop build with `-- --mobile` to try the phone layout.

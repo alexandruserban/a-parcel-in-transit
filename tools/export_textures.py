@@ -4,7 +4,7 @@ Runs tools/export_textures.html in headless Chrome. The page loads ../tidyup/js/
 that extend it), draws every texture the Godot port uses, and puts each one in the DOM as a PNG data URL.
 This script reads the DOM back and writes the files.
 
-    python tools/export_textures.py [path-to-chrome]
+    python tools/export_textures.py [path-to-chrome] [--only name1,name2]
 
 The ../tidyup checkout must sit next to this project.
 """
@@ -26,9 +26,14 @@ CHROME_CANDIDATES = [
 ]
 
 
+# --only a,b writes just those textures (the generators are random, so a full run changes every file)
+ONLY = set(sys.argv[sys.argv.index("--only") + 1].split(",")) if "--only" in sys.argv else set()
+ARGS = [a for i, a in enumerate(sys.argv[1:], 1) if a != "--only" and sys.argv[i - 1] != "--only"]
+
+
 def find_chrome() -> str:
-    if len(sys.argv) > 1:
-        return sys.argv[1]
+    if ARGS:
+        return ARGS[0]
     for c in CHROME_CANDIDATES:
         if Path(c).exists():
             return c
@@ -50,6 +55,8 @@ def main() -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     count = 0
     for name, url in re.findall(r'<pre data-name="([^"]+)">data:image/png;base64,([^<]+)</pre>', dom):
+        if ONLY and name not in ONLY:
+            continue
         path = OUT / (name + ".png")
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_bytes(base64.b64decode(url))

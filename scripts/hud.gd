@@ -220,7 +220,7 @@ func _build_menu(root: Control) -> void:
 	var v := VBoxContainer.new()
 	v.add_theme_constant_override("separation", 14)
 	panel.add_child(v)
-	var title := _label("PARCEL RUN", 52, Color("#fbbf24"))
+	var title := _label("PARCELS IN TRANSIT", 52, Color("#fbbf24"))
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(title)
 	var sub := _label("First-person old-town explorer & tidy-up quest", 17, Color("#cbd5e1"))
@@ -267,7 +267,7 @@ func _build_menu(root: Control) -> void:
 	play.custom_minimum_size = Vector2(0, 52)
 	play.pressed.connect(func() -> void: game.resume())
 	v.add_child(play)
-	var note := _label("Godot port, first iteration: house interiors, the truck, wind gusts and the moat come next.", 13, Color("#94a3b8"))
+	var note := _label("Walk into the houses, drive the delivery truck, and watch out for the wind.", 13, Color("#94a3b8"))
 	note.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(note)
 

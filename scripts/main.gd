@@ -122,7 +122,7 @@ func _ready() -> void:
 		add_child(touch)
 	hud.set_quest(0, parcels.total)
 	hud.set_backpack(backpack, BACKPACK_CAP)
-	print("Parcel Run ready in %d ms: %d parcels in the town" % [Time.get_ticks_msec() - t0, parcels.total])
+	print("Parcels in Transit ready in %d ms: %d parcels in the town" % [Time.get_ticks_msec() - t0, parcels.total])
 
 	# Headless / CI smoke run and screenshot mode
 	if "--smoke" in OS.get_cmdline_user_args():
@@ -662,6 +662,7 @@ func _screenshot_mode() -> void:
 		[Vector3(0, 0.1, 60), 0.6, 0.55, 11.0, "birds", 40.0],
 		[Vector3(-45, 0.1, 130), 0.0, -0.3, 10.0, "ducks", 40.0],
 		[Vector3(-15, 0.1, 9), 0.99, -0.12, 15.0, "truck", 60.0],
+		[Vector3(0, 0.1, 30), 0.0, -0.05, 14.0, "menu", 75.0],
 		[Vector3(-90, 0.1, -120), 1.30, 0.22, 16.0, "castle_town", 50.0],
 		[Vector3(-90, 0.1, -120), 1.30, 0.22, 22.5, "castle_night", 50.0],
 		[Vector3(0, 0.1, -176), 0.0, -0.05, 15.0, "nordtor_out", 70.0],
@@ -734,7 +735,13 @@ func _screenshot_mode() -> void:
 				player.set_process(false)
 				var eye := dk.position + side * 2.0 + Vector3(0, 0.6, 0)
 				player.camera.global_transform = Transform3D(Basis(), eye).looking_at(dk.position + Vector3(0, 0.12, 0))
+		if s[4] == "menu":
+			hud.show_menu(true)
+			await get_tree().process_frame
+			await get_tree().process_frame
 		var img := get_viewport().get_texture().get_image()
+		if s[4] == "menu":
+			hud.show_menu(false)
 		var path: String = OS.get_cmdline_user_args()[OS.get_cmdline_user_args().find("--shot") + 1] if OS.get_cmdline_user_args().size() > 1 else "user://"
 		img.save_png(path.path_join("shot_%s.png" % s[4]))
 		print("saved shot ", s[4])
