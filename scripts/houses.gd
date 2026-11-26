@@ -1126,7 +1126,11 @@ func _fachwerk(g: Transform3D, st: Dictionary, roof: Dictionary) -> void:
 	for side in lens:
 		var L: float = lens[side]
 		if st.frame == "full":
-			beam.call(side, -L, L, 0.4, 0.62)
+			if side == "front":   # the sill stops at the front door
+				beam.call(side, -L, -0.72, 0.4, 0.62)
+				beam.call(side, 0.72, L, 0.4, 0.62)
+			else:
+				beam.call(side, -L, L, 0.4, 0.62)
 		beam.call(side, -L, L, 3.3, 3.5)
 		beam.call(side, -L, L, 3.56, 3.76)
 		beam.call(side, -L, L, 6.3, 6.5)
@@ -1456,7 +1460,7 @@ func _garage(g: Transform3D, wall: Material, idx: int, st: Dictionary) -> void:
 		"eave": 0.2, "verge": 0.3, "roof": w.roof_mat(st.roof), "gable": wall})
 	var open := idx % 3 == 1
 	if not open:
-		obox(g, GW, GH, GD, gx, GH / 2, gz, wall)
+		obox(g, GW, GH + 0.22, GD, gx, (GH + 0.22) / 2, gz, wall)   # up to the roof (the web left a slit under it)
 		obox(g, 5.8, 3.4, 0.1, gx, 1.8, zF, door_mat)
 		col(g, gx, gz, GW, GD)
 		return

@@ -517,6 +517,13 @@ func _screenshot_mode() -> void:
 		[Vector3(0, 0, 0), "house", Vector3(-1.0, 1.6, 12.0), 20.5, "house_front", 70.0],
 		[Vector3(0, 0, 0), "house", Vector3(-4.0, 1.7, 22.0), 11.0, "house_timber", 70.0, 0],
 		[Vector3(0, 0, 0), "house", Vector3(-20.0, 1.7, 12.0), 11.0, "garage_open", 60.0, 1],
+		[Vector3(0, 0, 0), "house", Vector3(-19.0, 1.7, -8.0), 11.0, "garage_closed", 60.0, 0],
+		[Vector3(0, 0, 0), "house", Vector3(-11.5, 1.6, 2.5), 11.0, "garage_inside", 75.0, 1],
+		[Vector3(Vector3(-11.5, 2.0, 0.0)), "hcam", Vector3(-11.5, 1.7, 14.0), 11.0, "gar_front", 70.0, 0],
+		[Vector3(Vector3(-11.5, 2.0, -1.0)), "hcam", Vector3(-14.0, 1.7, -13.0), 11.0, "gar_back", 70.0, 0],
+		[Vector3(Vector3(-11.5, 2.0, -1.0)), "hcam", Vector3(-20.0, 8.0, 6.0), 11.0, "gar_high", 70.0, 0],
+		[Vector3(Vector3(-11.5, 2.0, 0.0)), "hcam", Vector3(-11.5, 1.7, 14.0), 11.0, "gar_front1", 70.0, 1],
+		[Vector3(Vector3(0.0, 1.2, 7.0)), "hcam", Vector3(0.0, 1.6, 10.5), 11.0, "front_door", 70.0, 0],
 		[Vector3(-200, 30, -110), "cam", Vector3(-290, 95, -175), 16.0, "castle_near", 55.0],
 		[Vector3(-262, 92, -165), "cam", Vector3(-298, 100, -178), 21.5, "castle_court", 70.0],
 		[Vector3(-31, 0.1, -5), -2.3, -0.12, 15.0, "truck_rear", 60.0],
@@ -546,11 +553,16 @@ func _screenshot_mode() -> void:
 				var rec: Dictionary = world.house_parts.interiors[s[6] if s.size() > 6 else 3]
 				var hx: Transform3D = rec.xf
 				var eye: Vector3 = hx * s[2]
-				var look: Vector3 = hx * (Vector3(-6.0, 1.0, 2.0) if s[4] == "living_room" else (Vector3(-5.0, 0.9, -6.5) if s[4] == "kitchen" else (Vector3(-5.0, UP_LOOK, 4.0) if s[4] == "upstairs" else (Vector3(-11.5, 1.5, 0.0) if s[4] == "garage_open" else Vector3(0, 4.0, 0)))))
+				var look: Vector3 = hx * (Vector3(-6.0, 1.0, 2.0) if s[4] == "living_room" else (Vector3(-5.0, 0.9, -6.5) if s[4] == "kitchen" else (Vector3(-5.0, UP_LOOK, 4.0) if s[4] == "upstairs" else (Vector3(-11.5, 1.5, 0.0) if s[4] in ["garage_open", "garage_closed"] else (Vector3(-11.5, 1.0, -5.0) if s[4] == "garage_inside" else Vector3(0, 4.0, 0))))))
 				player.set_physics_process(false)
 				player.set_process(false)
 				player.global_position = Vector3(eye.x, eye.y - 1.6, eye.z)
 				player.camera.global_transform = Transform3D(Basis(), eye).looking_at(look)
+			elif s[1] is String and s[1] == "hcam":   # house-space camera: eye s[2], target s[0], house s[6]
+				var hx2: Transform3D = world.house_parts.interiors[s[6]].xf
+				player.set_physics_process(false)
+				player.set_process(false)
+				player.camera.global_transform = Transform3D(Basis(), hx2 * s[2]).looking_at(hx2 * s[0])
 			elif s[1] is String and s[1] == "cam":   # free camera: from s[0] towards s[2]
 				player.set_physics_process(false)
 				player.set_process(false)
