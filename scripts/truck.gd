@@ -25,6 +25,7 @@ var wheels: Array = []                # [{pivot, spin, steerable}]
 var head_mat: StandardMaterial3D
 var tail_mat: StandardMaterial3D
 var beam: SpotLight3D
+var cab_light: OmniLight3D
 var body: AnimatableBody3D
 var door_item := {}
 var rear_item := {}
@@ -100,10 +101,12 @@ func _build_model() -> void:
 		B.call(0.02, 0.02, 2.2, dark, -3.745, 1.0 + k * 0.25, 0)
 	B.call(0.06, 0.06, 2.3, dark, -3.74, 3.32, 0)
 	# cab: body, roof fairing, stripe, windscreen, side windows, grille
-	B.call(2.1, 1.25, 2.3, paint, 2.55, 1.45, 0)
-	B.call(1.7, 0.95, 2.3, paint, 2.35, 2.55, 0)
+	# (faces that would cut through the cab interior are left out: _cab_interior lines it from inside)
+	B.call(1.62, 1.25, 2.3, [null, paint, null, paint, paint, paint], 2.31, 1.45, 0)    # cab, below the windows
+	B.call(0.48, 1.25, 2.3, [paint, null, paint, paint, paint, paint], 3.36, 1.45, 0)   # bonnet
+	B.call(1.7, 0.95, 2.3, [paint, paint, paint, null, paint, paint], 2.35, 2.55, 0)
 	B.call(1.3, 0.5, 2.2, paint, 2.0, 3.1, 0, -0.25)
-	B.call(2.12, 0.16, 2.32, orange, 2.55, 1.6, 0)
+	B.call(2.12, 0.16, 2.32, [orange, orange, null, null, orange, orange], 2.55, 1.6, 0)
 	B.call(5.22, 0.16, 2.48, orange, -1.1, 1.15, 0)
 	B.call(0.05, 0.85, 2.05, glass, 3.25, 2.5, 0, 0.18)
 	for s in [-1.0, 1.0]:
@@ -118,6 +121,7 @@ func _build_model() -> void:
 		B.call(0.06, 0.3, 0.16, dark, 3.0, 2.45, s * 1.32)
 		B.call(0.4, 0.06, 0.25, dark, 2.6, 0.55, s * 1.2)
 		B.call(1.0, 0.7, 0.05, dark, -2.3, 1.0, s * 1.3)
+	_cab_interior(b)
 	b.commit(self)
 
 	# wheels: steerable fronts, dual rears
@@ -157,6 +161,109 @@ func _build_model() -> void:
 	beam.look_at_from_position(beam.position, Vector3(14, 0, 0), Vector3.UP)
 	beam.visible = false
 	add_child(beam)
+
+
+## The cab from the inside: trimmed walls, headliner and floor facing inwards, with openings that line up with
+## the windscreen and side windows and reveals that close the gap to the glass, a dashboard with gauges, the
+## steering wheel on its column, a centre console and two seats. (The outside boxes are invisible from within.)
+const CX0 := 1.58     # back wall
+const CX1 := 3.12     # front wall (the windscreen glass leans just beyond it)
+const CY0 := 1.0      # floor
+const CY1 := 2.98     # headliner
+const CZ := 1.1       # side walls
+const WS := [2.1, 2.9, 0.98]            # windscreen opening: bottom, top, half width
+const SW := [1.98, 2.92, 2.18, 2.82]    # side window openings: x0, x1, y0, y1
+
+func _cab_interior(b) -> void:
+	var trim := _std(Color("#4b4f55"), 0.85)
+	var dash := _std(Color("#24262a"), 0.7)
+	var head := _std(Color("#9a9c9f"), 0.95)
+	var floor_m := _std(Color("#1a1b1d"), 0.95)
+	var seat := _std(Color("#2c3440"), 0.9)
+	var chrome := _std(Color("#c9ccd0"), 0.25, 0.9)
+	var gauge := _std(Color("#20262d"), 0.3)
+	gauge.emission_enabled = true
+	gauge.emission = Color("#6fc3ff")
+	gauge.emission_energy_multiplier = 0.35
+	var I := Transform3D.IDENTITY
+	var q := func(a: Vector3, c: Vector3, d: Vector3, e: Vector3, mat: Material, n: Vector3) -> void:
+		b.quad(I, a, c, d, e, mat, n, 1.0, false)
+	# floor and headliner
+	q.call(Vector3(CX0, CY0, -CZ), Vector3(CX1, CY0, -CZ), Vector3(CX1, CY0, CZ), Vector3(CX0, CY0, CZ), floor_m, Vector3.UP)
+	q.call(Vector3(CX0, CY1, -CZ), Vector3(CX1, CY1, -CZ), Vector3(CX1, CY1, CZ), Vector3(CX0, CY1, CZ), head, Vector3.DOWN)
+	# back wall
+	q.call(Vector3(CX0, CY0, -CZ), Vector3(CX0, CY0, CZ), Vector3(CX0, CY1, CZ), Vector3(CX0, CY1, -CZ), trim, Vector3.RIGHT)
+	# front wall round the windscreen opening (in z, y), facing back into the cab
+	var fw := func(z0: float, z1: float, y0: float, y1: float) -> void:
+		q.call(Vector3(CX1, y0, z0), Vector3(CX1, y0, z1), Vector3(CX1, y1, z1), Vector3(CX1, y1, z0), trim, Vector3.LEFT)
+	fw.call(-CZ, CZ, CY0, WS[0])
+	fw.call(-CZ, CZ, WS[1], CY1)
+	fw.call(-CZ, -WS[2], WS[0], WS[1])
+	fw.call(WS[2], CZ, WS[0], WS[1])
+	# windscreen reveals out to the leaning glass (A-pillars, header, sill)
+	var gx := 3.36
+	q.call(Vector3(CX1, WS[0], -WS[2]), Vector3(gx, WS[0], -WS[2]), Vector3(gx, WS[1], -WS[2]), Vector3(CX1, WS[1], -WS[2]), trim, Vector3.BACK)
+	q.call(Vector3(CX1, WS[0], WS[2]), Vector3(gx, WS[0], WS[2]), Vector3(gx, WS[1], WS[2]), Vector3(CX1, WS[1], WS[2]), trim, Vector3.FORWARD)
+	q.call(Vector3(CX1, WS[1], -WS[2]), Vector3(gx, WS[1], -WS[2]), Vector3(gx, WS[1], WS[2]), Vector3(CX1, WS[1], WS[2]), trim, Vector3.DOWN)
+	q.call(Vector3(CX1, WS[0], -WS[2]), Vector3(gx, WS[0], -WS[2]), Vector3(gx, WS[0], WS[2]), Vector3(CX1, WS[0], WS[2]), dash, Vector3.UP)
+	# side walls with the window openings, and their reveals out to the glass
+	for s in [-1.0, 1.0]:
+		var z: float = s * CZ
+		var n := Vector3(0, 0, -s)
+		var sw := func(x0: float, x1: float, y0: float, y1: float) -> void:
+			q.call(Vector3(x0, y0, z), Vector3(x1, y0, z), Vector3(x1, y1, z), Vector3(x0, y1, z), trim, n)
+		sw.call(CX0, CX1, CY0, SW[2])
+		sw.call(CX0, CX1, SW[3], CY1)
+		sw.call(CX0, SW[0], SW[2], SW[3])
+		sw.call(SW[1], CX1, SW[2], SW[3])
+		var zo: float = s * 1.18
+		q.call(Vector3(SW[0], SW[2], z), Vector3(SW[0], SW[2], zo), Vector3(SW[0], SW[3], zo), Vector3(SW[0], SW[3], z), trim, Vector3.RIGHT)
+		q.call(Vector3(SW[1], SW[2], z), Vector3(SW[1], SW[2], zo), Vector3(SW[1], SW[3], zo), Vector3(SW[1], SW[3], z), trim, Vector3.LEFT)
+		q.call(Vector3(SW[0], SW[3], z), Vector3(SW[1], SW[3], z), Vector3(SW[1], SW[3], zo), Vector3(SW[0], SW[3], zo), trim, Vector3.DOWN)
+		q.call(Vector3(SW[0], SW[2], z), Vector3(SW[1], SW[2], z), Vector3(SW[1], SW[2], zo), Vector3(SW[0], SW[2], zo), trim, Vector3.UP)
+		# door card: armrest and a handle under the window
+		b.box(I, Vector3(2.45, 1.75, s * (CZ - 0.05)), Vector3(0.7, 0.07, 0.1), dash, 1.0, false)
+		b.box(I, Vector3(2.85, 1.95, s * (CZ - 0.03)), Vector3(0.14, 0.04, 0.05), chrome, 1.0, false)
+	# dashboard: a deep moulding under the windscreen, the instrument binnacle and gauges, vents
+	b.box(I, Vector3(2.93, 1.55, 0), Vector3(0.38, 1.1, 2.18), dash, 1.0, false, true)
+	b.box(I, Vector3(2.8, 2.06, 0), Vector3(0.2, 0.04, 2.18), dash, 1.0, false)          # padded top edge
+	b.box(I, Vector3(2.82, 2.13, -0.5), Vector3(0.18, 0.12, 0.62), dash, 1.0, false)     # binnacle hood
+	for gz in [-0.66, -0.34]:
+		b.cylinder(Transform3D(Basis(Vector3.BACK, PI / 2), Vector3(2.73, 2.02, gz)), Vector3.ZERO, 0.065, 0.065, 0.01, 18, gauge, true, 1.0, false)
+	for vz in [-0.95, 0.15, 0.95]:
+		b.box(I, Vector3(2.73, 1.92, vz), Vector3(0.02, 0.1, 0.22), floor_m, 1.0, false)
+	# steering wheel on its column, leaning back towards the driver
+	var tilt := Basis(Vector3.BACK, -0.5)
+	var hub := Vector3(2.55, 1.98, -0.5)
+	var wheel := TorusMesh.new()
+	wheel.inner_radius = 0.17
+	wheel.outer_radius = 0.22
+	wheel.rings = 28
+	wheel.ring_segments = 8
+	b.mesh(Transform3D(tilt * Basis(Vector3.BACK, PI / 2), hub), wheel, dash, false)
+	for k in 3:   # spokes
+		var a := k * TAU / 3 + PI / 2
+		b.box(Transform3D(tilt * Basis(Vector3.RIGHT, a), hub), Vector3(0, 0.1, 0), Vector3(0.025, 0.19, 0.04), dash, 1.0, false)
+	b.cylinder(Transform3D(tilt * Basis(Vector3.BACK, PI / 2), hub), Vector3.ZERO, 0.06, 0.06, 0.05, 12, dash, true, 1.0, false)
+	b.cylinder(Transform3D(tilt * Basis(Vector3.BACK, -PI / 2), hub), Vector3.ZERO, 0.035, 0.045, 0.42, 10, dash, false, 1.0, false)
+	# centre console with a gear selector, and two seats behind you
+	b.box(I, Vector3(2.35, 1.3, 0.0), Vector3(0.9, 0.6, 0.32), dash, 1.0, false)
+	b.box(I, Vector3(2.45, 1.66, 0.0), Vector3(0.06, 0.14, 0.06), chrome, 1.0, false)
+	for sz in [-0.5, 0.55]:
+		b.box(I, Vector3(2.1, 1.45, sz), Vector3(0.55, 0.14, 0.55), seat, 1.0, false)
+		b.box(I, Vector3(1.8, 1.95, sz), Vector3(0.14, 0.9, 0.55), seat, 1.0, false)
+		b.box(I, Vector3(1.8, 2.5, sz), Vector3(0.12, 0.22, 0.3), seat, 1.0, false)
+		b.box(I, Vector3(2.1, 1.2, sz), Vector3(0.4, 0.36, 0.4), floor_m, 1.0, false)
+	# rear-view mirror at the top of the windscreen
+	b.box(I, Vector3(3.0, 2.82, 0.1), Vector3(0.03, 0.08, 0.26), dash, 1.0, false)
+	# soft courtesy light, on while you sit in the cab (the roof shades the inside otherwise)
+	cab_light = OmniLight3D.new()
+	cab_light.light_color = Color("#ffe9cc")
+	cab_light.light_energy = 0.9
+	cab_light.omni_range = 3.2
+	cab_light.position = Vector3(2.3, 2.85, 0)
+	cab_light.visible = false
+	add_child(cab_light)
 
 
 func _part(parent: Node3D, mesh: Mesh, mat: Material, xf: Transform3D) -> void:
@@ -283,7 +390,7 @@ func toggle_view() -> void:
 		return
 	view = "cab" if view == "chase" else "chase"
 	game.player.yaw = -heading - PI / 2
-	game.player.pitch = -0.05 if view == "cab" else 0.0
+	game.player.pitch = -0.15 if view == "cab" else 0.0   # glancing down over the dashboard
 
 
 func horn() -> void:
@@ -394,6 +501,7 @@ func _physics_process(dt: float) -> void:
 	# lights
 	var night: bool = game.is_night
 	beam.visible = driving and night
+	cab_light.visible = driving and view == "cab"
 	beam.light_energy = 3.2
 	head_mat.emission_energy_multiplier = (2.5 if night else 0.6) if driving else 0.15
 	tail_mat.emission_energy_multiplier = 2.2 if braking else (0.9 if driving and night else 0.25)
@@ -436,7 +544,7 @@ func _update_camera(dt: float) -> void:
 		P.yaw = -heading - PI / 2
 	else:
 		var left := Vector2(f.y, -f.x)
-		var eye := Vector3(pos.x + f.x * 2.35 + left.x * 0.5, 2.55, pos.y + f.y * 2.35 + left.y * 0.5)
+		var eye := Vector3(pos.x + f.x * 2.05 + left.x * 0.5, 2.45, pos.y + f.y * 2.05 + left.y * 0.5)   # driver's seat
 		cam.global_transform = Transform3D(Basis(Vector3.UP, P.yaw) * Basis(Vector3.RIGHT, P.pitch), eye)
 	# the player rides along (minimap, lamps, ducks all follow); the camera keeps the view set above
 	var keep := cam.global_transform
