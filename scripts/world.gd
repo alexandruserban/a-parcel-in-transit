@@ -177,6 +177,8 @@ func _make_materials() -> void:
 	mats.water = _shader_mat("res://shaders/water.gdshader")
 	mats.lily = _std(Color("#4f7a33"), 0.7)
 	mats.steel = _std(Color("#3c4146"), 0.5, 0.7)
+	mats.steel_2s = _std(Color("#3c4146"), 0.5, 0.7)
+	mats.steel_2s.cull_mode = BaseMaterial3D.CULL_DISABLED
 	mats.corrugated = tmat("corrugated_7d8b93", Vector2(2.5, 2.5), {"rough": 0.55, "metal": 0.55})
 	mats.corr_inner = tmat("corrugated_b9c0c4", Vector2(2.5, 2.5), {"rough": 0.7, "metal": 0.3})
 	mats.trim = _std(Color("#2f5d7c"), 0.5, 0.4)
@@ -876,8 +878,8 @@ func _church() -> void:
 	bx(I, CX, 64.6, 30.5, 1.2, 0.12, 0.12, mats.brass)
 	# Gothic west portal in the tower, stained glass round it, the great west window above (_church_portal)
 	_church_portal(CX, 26.0)
-	add_interactable(Vector3(CX, 1.6, 25.6), "[E] Look at St. Marien", "church",
-		func() -> Dictionary: return {"title": "St. Marien", "message": "A red sandstone Gothic church with a 63 m copper spire. Its bells and the inside come in a later version of the Godot port.", "sound": "click"})
+	add_interactable(Vector3(CX, 1.6, 25.6), "[E] Ring the church bells", "church",
+		func() -> Dictionary: return {"title": "St. Marien", "message": "You heave on the bell rope and the peal rings out over the town. The bells also strike every hour.", "peal": 6})
 	# Nave
 	bx(I, CX, 7, 48, 14, 14, 26, rs, true)
 	church_rects.append(rect(CX - 7, 35, CX + 7, 61))
@@ -1049,8 +1051,9 @@ func _warehouse() -> void:
 	while z < z1 - 1:
 		for xx in [cx - 6, cx + 6]:
 			bx(I, xx, H - 1.0, z, 0.03, 1.0, 0.03, mats.steel, false, false)
-			b.cylinder(I, Vector3(xx, H - 1.78, z), 0.5, 0.12, 0.35, 12, mats.steel, false, 1.0, false)
-			bx(I, xx, H - 1.78, z, 0.6, 0.04, 0.6, mats.depot_lamp, false, false)
+			# a steel shade seen from inside too, closed at the top, and the glowing lamp under it
+			b.cylinder(I, Vector3(xx, H - 1.78, z), 0.5, 0.12, 0.35, 16, mats.steel_2s, true, 1.0, false)
+			b.box(I, Vector3(xx, H - 1.7, z), Vector3(0.62, 0.05, 0.62), mats.depot_lamp, 1.0, false, true)
 		z += 11.0
 	for lz in [-9.0, 9.0]:
 		var l := OmniLight3D.new()

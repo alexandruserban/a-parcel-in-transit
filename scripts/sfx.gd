@@ -18,6 +18,10 @@ var _next := 0
 var _nature_t := 3.0
 var rng := RandomNumberGenerator.new()
 var engine: AudioStreamPlayer
+var bell_stream: AudioStreamWAV           # built on a worker thread (it takes a moment)
+var bell_players: Array[AudioStreamPlayer3D] = []
+var _bell_queue: Array = []               # [{t, pitch, db}]
+var _bell_t := 0.0
 var _engine_vol := 0.0
 var _engine_target := 0.0
 var _engine_pitch := 1.0
@@ -44,6 +48,7 @@ func _ready() -> void:
 	ambient.stream = streams.wind
 	ambient.volume_db = -20.0
 	add_child(ambient)
+	WorkerThreadPool.add_task(_build_bell)
 	engine = AudioStreamPlayer.new()
 	engine.stream = streams.engine
 	add_child(engine)
@@ -136,6 +141,97 @@ func _update_gust(delta: float) -> void:
 	gust_player.pitch_scale = 1.0 + 1.4 * (t / 0.3 if t < 0.3 else maxf(0.0, 1.0 - (t - 0.3) / 0.7) * 0.8 + 0.2)
 
 
+## A bell strike (audio.js playChurchBells): a G3 bell's inharmonic partials - hum, prime, minor third,
+## fifth, nominal and up - each with its own long decay, plus the clapper's knock. D4 and B3 are the same
+## bell played faster. Runs on a worker thread at start-up.
+func _build_bell() -> void:
+	var f := 196.0
+	var partials := [[0.5, 0.55, 7.0], [1.0, 0.8, 5.0], [1.183, 0.45, 3.6], [1.506, 0.3, 2.6], [2.0, 0.4, 2.2],
+		[2.514, 0.16, 1.5], [2.662, 0.12, 1.3], [3.011, 0.1, 1.0], [4.166, 0.05, 0.7]]
+	var n := int(5.5 * RATE)
+	var s := PackedFloat32Array()
+	s.resize(n)
+	for p in partials:
+		var w: float = TAU * f * p[0] / RATE
+		var amp: float = p[1] * 0.22
+		var k: float = log(0.0001) / (p[2] * RATE)   # exponential decay to -80 dB over d seconds
+		var c := cos(w)
+		var sn := sin(w)
+		var x := 0.0   # sine by rotation (no sin() per sample)
+		var y := 1.0
+		var g := amp
+		var decay := exp(k)
+		for i in mini(n, int(p[2] * RATE)):
+			var nx := x * c + y * sn
+			y = y * c - x * sn
+			x = nx
+			s[i] += x * g * minf(1.0, i / 88.0)
+			g *= decay
+	var r := RandomNumberGenerator.new()
+	var lp := 0.0
+	for i in int(0.04 * RATE):   # clapper
+		lp += 0.5 * ((r.randf() * 2.0 - 1.0) - lp)
+		s[i] += lp * 0.15 * (1.0 - i / (0.04 * RATE))
+	var data := PackedByteArray()
+	data.resize(n * 2)
+	for i in n:
+		data.encode_s16(i * 2, int(clampf(s[i] * 1.4, -1.0, 1.0) * 32767.0))
+	var wav := AudioStreamWAV.new()
+	wav.format = AudioStreamWAV.FORMAT_16_BITS
+	wav.mix_rate = RATE
+	wav.data = data
+	set_deferred("bell_stream", wav)
+
+
+## Bell players hanging in the belfry, so the bells are loud by the church and fade across town
+func hang_bells(parent: Node, at: Vector3) -> void:
+	for i in 4:
+		var p := AudioStreamPlayer3D.new()
+		p.position = at
+		p.unit_size = 45.0
+		p.max_distance = 900.0
+		p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+		p.panning_strength = 0.6
+		parent.add_child(p)
+		bell_players.append(p)
+
+
+## The hour: the tenor bell strikes once for each hour (1-12), slowly
+func strike_hour(hour: int) -> void:
+	var strikes := hour % 12
+	if strikes == 0:
+		strikes = 12
+	_bell_queue.clear()
+	for k in strikes:
+		_bell_queue.append({"t": 1.0 + k * 1.7, "pitch": 1.0, "db": 0.0})
+	_bell_t = 0.0
+
+
+## A peal: the three bells (D4, B3, G3) rung down in turn
+func peal(strikes := 6) -> void:
+	_bell_queue.clear()
+	var pitches := [1.498, 1.26, 1.0]
+	for k in strikes:
+		_bell_queue.append({"t": 0.2 + k * 0.95 + rng.randf() * 0.06, "pitch": pitches[k % 3] * (1.0 + (rng.randf() - 0.5) * 0.002), "db": -2.0})
+	_bell_t = 0.0
+
+
+func _update_bells(delta: float) -> void:
+	if _bell_queue.is_empty() or bell_stream == null:
+		return
+	_bell_t += delta
+	while not _bell_queue.is_empty() and _bell_queue[0].t <= _bell_t:
+		var e: Dictionary = _bell_queue.pop_front()
+		if not enabled:
+			continue
+		var p: AudioStreamPlayer3D = bell_players[_next % bell_players.size()]
+		_next += 1
+		p.stream = bell_stream
+		p.pitch_scale = e.pitch
+		p.volume_db = e.db
+		p.play()
+
+
 ## Mallard quack, louder the nearer the pond (volume 0..1, like playQuack)
 func quack(volume: float) -> void:
 	if volume > 0.01:
@@ -162,6 +258,7 @@ func stop_engine() -> void:
 
 func _process(delta: float) -> void:
 	_update_gust(delta)
+	_update_bells(delta)
 	_engine_vol = move_toward(_engine_vol, _engine_target if enabled else 0.0, delta * 0.4)
 	if engine.playing:
 		engine.pitch_scale = lerpf(engine.pitch_scale, _engine_pitch, minf(1.0, delta * 6.0))

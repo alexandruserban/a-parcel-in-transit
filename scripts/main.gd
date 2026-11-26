@@ -44,6 +44,7 @@ var SAVE_PATH := "user://save.json"
 var stats := {"time": 0.0, "picked": 0, "walked": 0.0, "driven": 0.0, "gusts": 0, "doorbells": 0, "dropped": 0, "sessions": 0, "first": "", "last": "", "bells": []}
 const INT_STATS := ["picked", "gusts", "doorbells", "dropped", "sessions"]
 var _save_t := 30.0
+var _bell_hour := -1
 var _last_walk_pos := Vector3.INF
 var test_mode := false
 var loaded := false
@@ -56,6 +57,7 @@ func _ready() -> void:
 		_mobile_graphics()
 	sfx = Sfx.new()
 	add_child(sfx)
+	sfx.hang_bells(self, Vector3(-45, 29, 30.5))   # in St. Marien's belfry
 
 	sun = DirectionalLight3D.new()
 	sun.shadow_enabled = true
@@ -213,6 +215,12 @@ func _process(delta: float) -> void:
 	world.set_water_sky(sky.params, sky.sun_dir, sky.moon_dir, sky.moon_amt, sky.daylight(), sky.sun_visibility())
 	birds.update(delta, sky.daylight())
 	_update_stats(delta)
+	# St. Marien strikes the hour
+	var whole := int(sky.hour) % 24
+	if started and whole != _bell_hour:
+		if _bell_hour != -1:
+			sfx.strike_hour(whole)
+		_bell_hour = whole
 	_update_wind(delta)
 	ducks.update(delta, player.global_position)
 	var night: bool = sky.is_night()
@@ -312,6 +320,8 @@ func interact() -> void:
 		sfx.play("click")
 		return
 	var res: Dictionary = cur.call.call()
+	if res.has("peal"):
+		sfx.peal(int(res.peal))
 	if res.get("sound", "") == "doorbell":
 		stats.doorbells += 1
 		# each household's greeting scores once; ringing the same bell again doesn't
@@ -649,6 +659,12 @@ func _smoke_test() -> void:
 	assert(filed.stored)
 	var eye: Vector3 = filed.pos + Vector3(0, 0.5, 1.2)
 	assert(parcels.nearest(eye, (filed.pos - eye).normalized(), 3.5) == null)
+	for i in 50:   # the bell is synthesised on a worker thread
+		if sfx.bell_stream != null:
+			break
+		await get_tree().create_timer(0.1).timeout
+	assert(sfx.bell_stream != null)
+	print("SMOKE: bell ready, %.1f s long" % sfx.bell_stream.get_length())
 	print("SMOKE: parcels %d -> %d, stored %d, score %d, backpack %d, player y %.2f" % [before, parcels.records.size(), parcels.stored_total(), score, backpack.size(), player.global_position.y])
 	get_tree().quit(0 if parcels.stored_total() == 1 else 1)
 
@@ -874,6 +890,7 @@ func _screenshot_mode() -> void:
 		[Vector3(150, 6, -205), "cam", Vector3(196, -1, -197), 15.0, "moat_corner", 65.0],
 		[Vector3(-45, 0.1, -10), PI, 0.5, 22.5, "church_night", 70.0],
 		[Vector3(-45, 1.7, 13), "cam", Vector3(-45, 6.5, 26), 11.0, "church_portal", 65.0],
+		[Vector3(-170, 1.7, 2), "cam", Vector3(-160, 5.6, -4), 11.0, "depot_lamps", 70.0],
 		[Vector3(-45, 1.7, 13), "cam", Vector3(-45, 6.5, 26), 22.5, "church_portal_night", 65.0],
 		[Vector3(-22, 0.1, 86), PI / 2 - 0.2, 0.05, 22.5, "park_night", 75.0],
 		[Vector3(-41, 0.1, 89), PI + 0.3, 0.02, 22.5, "park_night2", 75.0],
