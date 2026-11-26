@@ -144,16 +144,16 @@ func quack(volume: float) -> void:
 
 ## Diesel engine loop for the truck: pitch and loudness follow speed / throttle (startEngine / setEngine)
 func start_engine() -> void:
-	_engine_target = 0.015
-	_engine_pitch = 0.55
+	_engine_target = 0.004
+	_engine_pitch = 0.75
 	if enabled and not engine.playing:
 		engine.play()
 
 
 func set_engine(speed01: float, throttle: bool) -> void:
 	# an electric motor is nearly silent at a standstill and its whine climbs steeply with speed
-	_engine_pitch = 0.55 + speed01 * 2.6 + (0.08 if throttle else 0.0)
-	_engine_target = 0.015 + speed01 * 0.08 + (0.025 if throttle else 0.0)
+	_engine_pitch = 0.75 + speed01 * 0.9
+	_engine_target = 0.004 + speed01 * 0.035 + (0.006 if throttle else 0.0)
 
 
 func stop_engine() -> void:
@@ -361,18 +361,17 @@ func _build() -> void:
 			var env := minf(t / 0.03, 1.0) * (1.0 if t < 0.45 else exp(-(t - 0.45) * 40.0))
 			horn[i] += (0.16 if fmod(t * f, 1.0) < 0.5 else -0.16) * env
 	streams.horn = _wav(horn)
-	# Electric drive: the motor's tonal whine (fundamental, harmonics and the inverter's high note) over a soft
-	# low-passed rush of tyres and air. 2 s, all whole-hertz tones, so the loop is seamless.
+	# Electric drive, kept subtle: a soft low hum (a sine and a quiet octave) under a gentle low-passed rush of
+	# tyres and air. 2 s of whole-hertz tones, so the loop is seamless.
 	var eng := _buf(2.0)
 	var rush := 0.0
 	for i in eng.size():
 		var t := float(i) / RATE
-		rush += 0.04 * ((rng.randf() * 2.0 - 1.0) - rush)
-		eng[i] = 0.42 * sin(TAU * 150.0 * t) + 0.22 * sin(TAU * 300.0 * t) + 0.08 * sin(TAU * 450.0 * t) \
-			+ 0.05 * sin(TAU * 1200.0 * t) + 0.025 * sin(TAU * 2400.0 * t) + rush * 0.9
+		rush += 0.015 * ((rng.randf() * 2.0 - 1.0) - rush)
+		eng[i] = 0.3 * sin(TAU * 110.0 * t) + 0.06 * sin(TAU * 220.0 * t) + rush * 2.2
 	var efade := int(0.2 * RATE)
 	for i in efade:   # cross-fade the noise seam
 		var k := float(i) / efade
 		eng[i] = eng[i] * k + eng[eng.size() - efade + i] * (1.0 - k)
 	eng.resize(eng.size() - efade)
-	streams.engine = _wav(_amp(eng, 0.6), true)
+	streams.engine = _wav(_amp(_biquad(eng, "low", 600.0, 0.707), 0.6), true)
