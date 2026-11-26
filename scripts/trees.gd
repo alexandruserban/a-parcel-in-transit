@@ -155,7 +155,7 @@ func build_tree(x: float, z: float, type := "deciduous", scale := 1.0) -> void:
 				tips.append(e2)
 		tips.append(crown + Vector3(0, 0.8 * s, 0))
 		var kind := "leafcard_blossom" if type == "flowering" else "leafcard_leaf"
-		var per_tip := 12 if type == "flowering" else (14 if lush else 13)
+		var per_tip := 12 if type == "flowering" else (maxi(6, roundi(14 * world.tree_detail)) if lush else 13)
 		var spread := 2.5 if lush else 2.0
 		for tip in tips:
 			for i in per_tip:
@@ -165,7 +165,7 @@ func build_tree(x: float, z: float, type := "deciduous", scale := 1.0) -> void:
 				card.call(kind, rc[0], rc[1], rc[2], rc[3])
 		if lush:
 			# fill the inside of the crown so it reads as one dense dome, not a ring of clumps
-			for i in 36:
+			for i in roundi(36 * world.tree_detail):
 				var off := Vector3(_r() - 0.5, _r() - 0.35, _r() - 0.5) * (4.4 * s)
 				var rc := _random_card(crown + Vector3(0, 0.6 * s, 0) + off, (1.4 + _r() * 0.6) * s, crown, 0.35)
 				card.call(kind, rc[0], rc[1], rc[2], rc[3])

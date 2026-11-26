@@ -44,6 +44,7 @@ var gate_spots: Array[Vector2] = []
 var tree_spots: Array[Vector2] = []
 
 var trees: Trees
+var tree_detail := 1.0       # leaf clusters in the big trees (GFX.treeDetail: 0.5 on phones)
 var water_mats: Array[ShaderMaterial] = []
 var night_glows: Array = []           # [{mat, energy}] emissive materials that light up at night
 var mats := {}
@@ -150,7 +151,10 @@ func _make_materials() -> void:
 		var g := tmat("stainedglass_%d" % k, Vector2(1.6, 6.0), {"rough": 0.2})
 		night_glows.append({"mat": g, "energy": 1.8})
 		mats.church_glass.append(g)
-	mats.lamp = _glow(Color("#f2e6d0"), Color("#ffc98a"), 3.5)
+	mats.lamp = _glow(Color("#e9e1cf"), Color("#ffd09a"), 4.0)
+	mats.lamp.roughness = 0.15
+	mats.lamp_iron = _std(Color("#1f3229"), 0.5, 0.55)
+	mats.gilt = _std(Color("#b8913a"), 0.35, 0.9)
 	mats.hedge = tmat("foliage_bush", Vector2(2, 2), {"rough": 0.95, "tint": Color("#8fa77c"), "depth": 0.8})
 	mats.water = _shader_mat("res://shaders/water.gdshader")
 	mats.lily = _std(Color("#4f7a33"), 0.7)
@@ -1373,37 +1377,72 @@ func _city_wall() -> void:
 # Cast-iron street lanterns
 # ----------------------------------------------------------------------------------------------
 func _street_lights() -> void:
-	var k := 0
-	for s in NS_STREETS:
-		var z := -155.0
-		while z <= 155.0:
-			if absf(z) > 14 and absf(absf(z) - 165) > 14:
-				var side := 1 if k % 2 == 0 else -1
-				_lantern(s.x + side * (NS_HALF + 0.7), z)
-				k += 1
-			z += 26.0
-	for e in EW_STREETS:
-		var x := -80.0
-		while x <= 80.0:
-			if absf(x) > 14 and absf(absf(x) - 90) > 14:
-				var side := 1 if k % 2 == 0 else -1
-				if absf(e.z) > 1:
-					side = -int(signf(e.z))
-				_lantern(x, e.z + side * (EW_HALF + 0.7))
-				k += 1
-			x += 26.0
+	# Street lamps along every street, alternating sides (buildStreetFurniture in world.js)
+	var near := func(v: float, cuts: Array, m: float) -> bool:
+		for c in cuts:
+			if absf(v - c) < m:
+				return true
+		return false
+	var z_cuts := [-165.0, 0.0, 165.0]
+	var x_cuts := [-90.0, 0.0, 90.0]
+	for si in NS_STREETS.size():
+		var sx: float = NS_STREETS[si].x
+		var k := si
+		for z in [-138.5, -110.5, -82.5, -54.5, -26.5, 26.5, 54.5, 82.5, 110.5, 138.5]:
+			if near.call(z, z_cuts, 14.0):
+				continue
+			var side := 1 if k % 2 == 1 else -1
+			k += 1
+			_lantern(sx + side * (NS_HALF + 1), z)
+	for ei in EW_STREETS.size():
+		var ez: float = EW_STREETS[ei].z
+		var k := ei
+		for x in [-58.0, -32.0, 32.0, 58.0]:
+			if near.call(x, x_cuts, 14.0):
+				continue
+			var side := 1 if k % 2 == 1 else -1
+			k += 1
+			# an outer loop road only has houses on one side: keep its lamps on the town side
+			var sd := -int(signf(ez)) if absf(ez) > 1 else side
+			_lantern(x, ez + sd * (EW_HALF + 1))
+	# Lanterns at the corners of the small squares
+	for r in small_squares:
+		var front := r.position.y if absf(r.position.y) < absf(r.end.y) else r.end.y
+		var inward := 1.0 if front == r.position.y else -1.0
+		for sx in [-1, 1]:
+			_lantern(r.get_center().x + sx * 5.6, front + inward * 1.0)
 
 
+## Cast-iron street lantern, ported from buildStreetLight() in world.js: stepped octagonal base, fluted shaft
+## with a gilt ring, lamplighter's ladder bar, and a tapered glass lantern (wider at the top) in an iron frame
+## under a pyramid hood with a gilt finial.
 func _lantern(x: float, z: float) -> void:
-	var I := Transform3D.IDENTITY
-	b.cylinder(I, Vector3(x, 0.25, z), 0.12, 0.07, 0.6, 8, mats.iron)
-	b.cylinder(I, Vector3(x, 0.85, z), 0.07, 0.05, 3.4, 8, mats.iron)
-	bx(I, x, 4.45, z, 0.42, 0.55, 0.42, mats.iron, false, true)
-	bx(I, x, 4.45, z, 0.36, 0.5, 0.46, mats.lamp, false, false)
-	bx(I, x, 4.45, z, 0.46, 0.5, 0.36, mats.lamp, false, false)
-	b.cylinder(I, Vector3(x, 4.72, z), 0.34, 0.0, 0.35, 4, mats.iron, false, 1.0, true, PI / 4)
-	solid_cyl(x, z, 0.12, 4.3)
-	lamp_sources.append(Vector3(x, 4.3, z))
+	var I := Transform3D(Basis(), Vector3(x, 0, z))
+	var iron: Material = mats.lamp_iron
+	var gilt: Material = mats.gilt
+	var lens: Material = mats.lamp
+	var cyl := func(r_top: float, r_bot: float, h: float, segs: int, mat: Material, y_mid: float, square := false) -> void:
+		b.cylinder(I, Vector3(0, y_mid - h / 2, 0), r_bot, r_top, h, segs, mat, true, 1.0, true, PI / 4 if square else 0.0)
+	cyl.call(0.26, 0.3, 0.5, 8, iron, 0.25)
+	cyl.call(0.19, 0.24, 0.35, 8, iron, 0.67)
+	cyl.call(0.085, 0.12, 3.4, 12, iron, 2.5)
+	cyl.call(0.14, 0.14, 0.05, 12, gilt, 0.95)
+	cyl.call(0.13, 0.1, 0.18, 12, iron, 4.2)
+	b.box(I, Vector3(0, 3.9, 0), Vector3(0.7, 0.05, 0.05), iron, 1.0, false)
+	for dx in [-0.35, 0.35]:
+		b.cylinder(I, Vector3(dx, 3.86, 0), 0.045, 0.045, 0.08, 8, gilt)
+	# Lantern: tapered glass box, iron frame top and bottom, corner posts, hood and finial
+	cyl.call(0.3, 0.2, 0.62, 4, lens, 4.62, true)
+	cyl.call(0.33, 0.33, 0.06, 4, iron, 4.95, true)
+	cyl.call(0.22, 0.16, 0.12, 4, iron, 4.27, true)
+	for k in 4:
+		var a := k * PI / 2
+		b.box(I, Vector3(cos(a) * 0.25, 4.62, sin(a) * 0.25), Vector3(0.03, 0.64, 0.03), iron, 1.0, false)
+	cyl.call(0.0, 0.42, 0.34, 4, iron, 5.15, true)
+	b.cylinder(I, Vector3(0, 5.31, 0), 0.06, 0.0, 0.1, 8, gilt)
+	b.cylinder(I, Vector3(0, 5.3, 0), 0.06, 0.06, 0.04, 8, gilt)
+	solid_cyl(x, z, 0.35, 4.3)
+	lamp_sources.append(Vector3(x, 4.5, z))
 
 
 # ----------------------------------------------------------------------------------------------

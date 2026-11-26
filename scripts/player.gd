@@ -29,6 +29,9 @@ var step_cycle := 0.0
 var stepped := false
 var fall_speed := 0.0
 var current = null          # Dictionary: world interactable, or a parcel record (has "slot")
+var move_input := Vector2.ZERO   # touch joystick (x strafe, y forward/back, -1..1)
+var touch_sprint := false
+var mobile := false
 
 
 func _ready() -> void:
@@ -102,11 +105,18 @@ func _physics_process(delta: float) -> void:
 	if _key(KEY_S, KEY_DOWN): input.y += 1
 	if _key(KEY_A, KEY_LEFT): input.x -= 1
 	if _key(KEY_D, KEY_RIGHT): input.x += 1
-	var sprint := _key(KEY_SHIFT)
+	var sprint := _key(KEY_SHIFT) or touch_sprint
 	var speed := CROUCH if crouching else (SPRINT if sprint else WALK)
+	if mobile:   # the small screen and analog stick make desktop speeds feel too fast (player.js)
+		speed = 2.4 if crouching else (7.5 if sprint else 4.2)
+	# The touch joystick overrides the keys, and walks slower when only pushed part-way
+	var analog := 1.0
+	if move_input.length_squared() > 0.0001:
+		input = move_input
+		analog = minf(1.0, move_input.length())
 	var moving := input.length_squared() > 0.01
 	if moving:
-		var dir := Vector3(input.x, 0, input.y).normalized().rotated(Vector3.UP, yaw)
+		var dir := Vector3(input.x, 0, input.y).normalized().rotated(Vector3.UP, yaw) * analog
 		velocity.x = dir.x * speed
 		velocity.z = dir.z * speed
 	else:

@@ -8,6 +8,7 @@ const SkyCycle := preload("res://scripts/sky_cycle.gd")
 const Hud := preload("res://scripts/hud.gd")
 const Parcels := preload("res://scripts/parcels.gd")
 const Sfx := preload("res://scripts/sfx.gd")
+const Touch := preload("res://scripts/touch.gd")
 
 const BACKPACK_CAP := 10
 const LAMP_POOL := 14
@@ -26,18 +27,22 @@ var victory := false
 var started := false
 var lamp_pool: Array[OmniLight3D] = []
 var _pool_t := 0.0
-var _gfx_frames := 0
+var mobile := false
+var touch
 
 
 func _ready() -> void:
 	var t0 := Time.get_ticks_msec()
+	mobile = OS.has_feature("mobile") or "--mobile" in OS.get_cmdline_user_args()
+	if mobile:
+		_mobile_graphics()
 	sfx = Sfx.new()
 	add_child(sfx)
 
 	sun = DirectionalLight3D.new()
 	sun.shadow_enabled = true
-	sun.directional_shadow_max_distance = 160.0
-	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+	sun.directional_shadow_max_distance = 90.0 if mobile else 160.0
+	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS if mobile else DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
 	sun.shadow_blur = 1.5
 	add_child(sun)
 	var env_node := WorldEnvironment.new()
@@ -47,6 +52,7 @@ func _ready() -> void:
 	sky.setup(env_node, sun)
 
 	world = World.new()
+	world.tree_detail = 0.5 if mobile else 1.0
 	add_child(world)
 	world.build()
 	parcels = Parcels.new()
@@ -57,6 +63,7 @@ func _ready() -> void:
 	player = Player.new()
 	player.world = world
 	player.game = self
+	player.mobile = mobile
 	add_child(player)
 	player.global_position = Vector3(0, 0.1, 0)
 
@@ -72,7 +79,12 @@ func _ready() -> void:
 
 	hud = Hud.new()
 	hud.game = self
+	hud.mobile = mobile
 	add_child(hud)
+	if mobile:
+		touch = Touch.new()
+		touch.game = self
+		add_child(touch)
 	hud.set_quest(0, parcels.total)
 	hud.set_backpack(backpack, BACKPACK_CAP)
 	print("Parcel Run ready in %d ms: %d parcels in the town" % [Time.get_ticks_msec() - t0, parcels.total])
@@ -91,14 +103,33 @@ func pause() -> void:
 	get_tree().paused = true
 	Input.mouse_mode = Input.MOUSE_MODE_VISIBLE
 	hud.show_menu(true)
+	if touch:
+		touch.visible = false
 
 
 func resume() -> void:
 	started = true
 	hud.show_menu(false)
 	get_tree().paused = false
-	Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
+	if touch:
+		touch.visible = true
+	else:
+		Input.mouse_mode = Input.MOUSE_MODE_CAPTURED
 	sfx.start()
+
+
+## Phones: the Android back button and leaving the app open the pause menu
+func _notification(what: int) -> void:
+	if what == NOTIFICATION_WM_GO_BACK_REQUEST or what == NOTIFICATION_APPLICATION_PAUSED:
+		if hud and not get_tree().paused:
+			pause()
+
+
+## Lighter settings for phones, like the web version's Low preset: lower 3D resolution, smaller and nearer
+## shadows, half the leaf clusters in the big trees
+func _mobile_graphics() -> void:
+	get_viewport().scaling_3d_scale = 0.75
+	RenderingServer.directional_shadow_atlas_set_size(2048, true)
 
 
 func _process(delta: float) -> void:
@@ -109,7 +140,7 @@ func _process(delta: float) -> void:
 		is_night = night
 		world.set_night(night)
 		sfx.night = night
-	hud.set_clock("[N] %s %s" % [sky.clock_text(), sky.phase_name()])
+	hud.set_clock(("%s %s" if mobile else "[N] %s %s") % [sky.clock_text(), sky.phase_name()])
 	_update_lamp_pool(delta)
 	_update_prompt()
 
@@ -327,6 +358,7 @@ func _screenshot_mode() -> void:
 		[Vector3(30, 0.1, -12), 2.4, 0.05, 22.5, "night"],
 		[Vector3(-38, 0.1, 132), 0.15, -0.12, 15.0, "pond"],
 		[Vector3(-60, 0.1, 85), -2.6, -0.02, 11.0, "park_trees"],
+		[Vector3(-3.6, 0.1, 29.4), 0.785, 0.52, 19.0, "lamp"],
 	]
 	for s in _shots:
 		player.global_position = s[0]

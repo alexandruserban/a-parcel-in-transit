@@ -5,6 +5,7 @@ extends CanvasLayer
 const Minimap := preload("res://scripts/minimap.gd")
 
 var game
+var mobile := false
 var score_label: Label
 var clock_label: Label
 var weather_label: Label
@@ -51,7 +52,11 @@ func _ready() -> void:
 	weather_label = _pill_label(top_r, "[B] Weather: clear")
 	clock_label = _pill_label(top_r, "[N] 14:00 Day")
 	sound_label = _pill_label(top_r, "[K] Sound: on")
-	_pill_label(top_r, "[M] Map")
+	var map_pill := _pill_label(top_r, "[M] Map")
+	if mobile:   # keyboard hints mean nothing on a phone, and the pause button sits up there
+		weather_label.get_parent().visible = false
+		sound_label.get_parent().visible = false
+		map_pill.get_parent().visible = false
 
 	# Depot task and backpack (left)
 	var left := VBoxContainer.new()
@@ -133,6 +138,7 @@ func _ready() -> void:
 	var hint := _label("[WASD] Walk  |  [Shift] Sprint  |  [Space] Jump  |  [C] Crouch\n[E] Interact / Pick up / Store in depot  |  [G] Drop a parcel\n[F] Flashlight  |  [B] Weather  |  [N] Skip time  |  [M] Map  |  [Esc] Menu", 12, Color(1, 1, 1, 0.7))
 	hint.set_anchors_preset(Control.PRESET_BOTTOM_LEFT)
 	hint.position = Vector2(16, -70)
+	hint.visible = not mobile
 	root.add_child(hint)
 
 	_build_menu(root)
@@ -227,6 +233,9 @@ func _build_menu(root: Control) -> void:
 	v.add_child(grid)
 	var rows := [["Move around", "W A S D"], ["Look around", "MOUSE"], ["Jump / Crouch", "SPACE / C"], ["Sprint", "SHIFT"],
 		["Interact / Pick up / Store", "E / ENTER"], ["Drop a parcel", "G"], ["Flashlight", "F"], ["Skip time / Weather", "N / B"]]
+	if mobile:
+		rows = [["Move", "LEFT THUMB"], ["Sprint", "PUSH TO THE EDGE"], ["Look around", "DRAG RIGHT SIDE"], ["Pick up / Store", "USE"],
+			["Jump / Crouch", "BUTTONS"], ["Drop a parcel", "DROP"], ["Flashlight", "LIGHT"], ["Pause", "II / BACK"]]
 	for r in rows:
 		grid.add_child(_label(r[0], 15, Color("#e2e8f0")))
 		grid.add_child(_label(r[1], 15, Color("#fbbf24")))
@@ -253,7 +262,7 @@ func _build_menu(root: Control) -> void:
 		game.sfx.set_music_volume(val / 100.0)
 		music_value.text = "%d%%" % int(val))
 	var play := Button.new()
-	play.text = "CLICK TO START EXPLORING"
+	play.text = "TAP TO START EXPLORING" if mobile else "CLICK TO START EXPLORING"
 	play.add_theme_font_size_override("font_size", 20)
 	play.custom_minimum_size = Vector2(0, 52)
 	play.pressed.connect(func() -> void: game.resume())
