@@ -222,6 +222,8 @@ func build_forest(parent: Node3D) -> void:
 		var z := sin(a) * r
 		if maxf(absf(x), absf(z)) < 228:
 			continue
+		if world.Castle.hill_mask(x, z) > 0.02:   # the crag has its own conifers (castle.gd)
+			continue
 		var h: float = world.mountain_height(x, z)
 		if h > 130 + world._vnoise(x * 0.01, z * 0.01) * 50 or world._vnoise(x * 0.012 + 7, z * 0.012) < 0.35:
 			continue

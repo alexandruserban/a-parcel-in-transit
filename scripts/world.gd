@@ -7,6 +7,7 @@ extends Node3D
 
 const Batch := preload("res://scripts/batch.gd")
 const Trees := preload("res://scripts/trees.gd")
+const Castle := preload("res://scripts/castle.gd")
 const WATER_Y := -0.32        # pond water level, below the lawn (world.js WATER_Y)
 
 const FENCE := 185.0          # inner face of the city wall
@@ -81,6 +82,7 @@ func build() -> void:
 	_avenue_trees()
 	_vegetation()
 	_mountains()
+	Castle.new().build(self)
 	trees.build_forest(self)
 	var cards: int = trees.commit(self)
 	var n := b.commit(self)
@@ -1603,6 +1605,10 @@ static func mountain_height(x: float, z: float) -> float:
 	var dz := z + 980
 	h += 470 * exp(-(dx * dx + dz * dz) / (2 * 230 * 230)) * (0.75 + 0.35 * ridge)
 	h *= smoothstep(214, 252, maxf(absf(x), absf(z)))
+	# the castle crag north-west of town, with its flat top (castle.gd)
+	var cm := Castle.hill_mask(x, z)
+	if cm > 0.0:
+		h = h * (1.0 - cm) + Castle.HILL.top * cm
 	return h - 0.6
 
 

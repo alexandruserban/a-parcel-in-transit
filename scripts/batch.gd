@@ -75,6 +75,109 @@ func tri(xf: Transform3D, a: Vector3, b: Vector3, c: Vector3, mat: Material,
 		_v(st, A, n, Vector2.ZERO); _v(st, B, n, ub); _v(st, C, n, uc)
 
 
+## Triangle with explicit UVs (for glass and pictures that map one image over the shape)
+func tri_uv(xf: Transform3D, a: Vector3, b: Vector3, c: Vector3, ua: Vector2, ub: Vector2, uc: Vector2, mat: Material,
+		out := Vector3.ZERO, shadow := true) -> void:
+	var A := xf * a
+	var B := xf * b
+	var C := xf * c
+	var n := (B - A).cross(C - A)
+	var flip := out != Vector3.ZERO and n.dot(xf.basis * out) < 0.0
+	if flip:
+		n = -n
+	n = n.normalized()
+	var st := _tool(mat, (A + B + C) / 3.0, shadow)
+	if not flip:
+		_v(st, A, n, ua); _v(st, C, n, uc); _v(st, B, n, ub)
+	else:
+		_v(st, A, n, ua); _v(st, B, n, ub); _v(st, C, n, uc)
+
+
+## Any mesh (a PrimitiveMesh or ArrayMesh, surface 0) placed with xf. UVs are kept (0..1 for primitives) and
+## scaled by uv_mul. flat: per-face normals (faceted rocks).
+func mesh(xf: Transform3D, m: Mesh, mat: Material, shadow := true, flat := false, uv_mul := Vector2.ONE) -> void:
+	var arr: Array = m.surface_get_arrays(0)
+	var verts: PackedVector3Array = arr[Mesh.ARRAY_VERTEX]
+	var norms: PackedVector3Array = arr[Mesh.ARRAY_NORMAL]
+	var uvs = arr[Mesh.ARRAY_TEX_UV]
+	var idx = arr[Mesh.ARRAY_INDEX]
+	var nb := xf.basis.inverse().transposed()
+	var mirrored := xf.basis.determinant() < 0.0
+	var st := _tool(mat, xf.origin, shadow)
+	var count: int = idx.size() if idx != null and idx.size() > 0 else verts.size()
+	for t in range(0, count, 3):
+		var ids := [t, t + 1, t + 2]
+		if idx != null and idx.size() > 0:
+			ids = [idx[t], idx[t + 1], idx[t + 2]]
+		if mirrored:
+			ids = [ids[0], ids[2], ids[1]]
+		var P := [xf * verts[ids[0]], xf * verts[ids[1]], xf * verts[ids[2]]]
+		var fn: Vector3 = (P[2] - P[0]).cross(P[1] - P[0]).normalized()   # clockwise front faces
+		for k in 3:
+			var nn: Vector3 = fn if flat else (nb * norms[ids[k]]).normalized()
+			var uv: Vector2 = (uvs[ids[k]] * uv_mul) if uvs != null and uvs.size() > 0 else Vector2.ZERO
+			_v(st, P[k], nn, uv)
+
+
+## Flat polygon (any simple outline in the xy plane of xf, facing +z), triangulated; UVs in metres / uv_scale
+## or, with fit = Rect2, mapped so that rect covers the image once (v down)
+func polygon(xf: Transform3D, pts: PackedVector2Array, mat: Material, uv_scale := 1.0, shadow := true, fit := Rect2()) -> void:
+	var tris := Geometry2D.triangulate_polygon(pts)
+	for t in range(0, tris.size(), 3):
+		var p := [pts[tris[t]], pts[tris[t + 1]], pts[tris[t + 2]]]
+		var uv := []
+		for q in p:
+			if fit.size != Vector2.ZERO:
+				uv.append(Vector2((q.x - fit.position.x) / fit.size.x, 1.0 - (q.y - fit.position.y) / fit.size.y))
+			else:
+				uv.append(Vector2(q.x, -q.y) / uv_scale)
+		tri_uv(xf, Vector3(p[0].x, p[0].y, 0), Vector3(p[1].x, p[1].y, 0), Vector3(p[2].x, p[2].y, 0), uv[0], uv[1], uv[2], mat, Vector3.BACK, shadow)
+
+
+## Prism: a flat outline extruded from z = 0 to z = depth (front face at +depth, back at 0, side walls)
+func prism(xf: Transform3D, pts: PackedVector2Array, depth: float, mat: Material, uv_scale := 1.0, shadow := true) -> void:
+	polygon(xf * Transform3D(Basis(), Vector3(0, 0, depth)), pts, mat, uv_scale, shadow)
+	var back := xf * Transform3D(Basis(Vector3.UP, PI), Vector3.ZERO)
+	var rev := PackedVector2Array()
+	for i in range(pts.size() - 1, -1, -1):
+		rev.append(Vector2(-pts[i].x, pts[i].y))
+	polygon(back, rev, mat, uv_scale, shadow)
+	ring_walls(xf, pts, depth, mat, true, uv_scale, shadow)
+
+
+## Side walls round an outline (closed), facing outward from its centroid (or inward)
+func ring_walls(xf: Transform3D, pts: PackedVector2Array, depth: float, mat: Material, closed := true, uv_scale := 1.0, shadow := true, inward := false) -> void:
+	var c := Vector2.ZERO
+	for q in pts:
+		c += q
+	c /= pts.size()
+	var n := pts.size() if closed else pts.size() - 1
+	for i in n:
+		var a := pts[i]
+		var bb := pts[(i + 1) % pts.size()]
+		if a.distance_to(bb) < 1e-5:
+			continue
+		var mid := (a + bb) * 0.5
+		var e := bb - a
+		var nrm := Vector2(e.y, -e.x)
+		if nrm.dot(mid - c) < 0.0:
+			nrm = -nrm
+		if inward:
+			nrm = -nrm
+		quad(xf, Vector3(a.x, a.y, 0), Vector3(bb.x, bb.y, 0), Vector3(bb.x, bb.y, depth), Vector3(a.x, a.y, depth), mat, Vector3(nrm.x, nrm.y, 0), uv_scale, shadow)
+
+
+## Band between two polylines with the same number of points (an arch frame), at z = 0 facing +z (or -z)
+func strip(xf: Transform3D, outer: PackedVector2Array, inner: PackedVector2Array, mat: Material, facing := Vector3.BACK, uv_scale := 1.0, shadow := true) -> void:
+	for i in outer.size() - 1:
+		var a := outer[i]
+		var bb := outer[i + 1]
+		var c := inner[i + 1]
+		var d := inner[i]
+		tri(xf, Vector3(a.x, a.y, 0), Vector3(bb.x, bb.y, 0), Vector3(c.x, c.y, 0), mat, facing, uv_scale, shadow)
+		tri(xf, Vector3(a.x, a.y, 0), Vector3(c.x, c.y, 0), Vector3(d.x, d.y, 0), mat, facing, uv_scale, shadow)
+
+
 static func _ext(v: Vector3, h: Vector3) -> float:
 	return absf(v.x) * h.x + absf(v.y) * h.y + absf(v.z) * h.z
 

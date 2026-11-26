@@ -437,6 +437,9 @@ func _screenshot_mode() -> void:
 		[Vector3(0, 0.1, 60), 0.6, 0.55, 11.0, "birds", 40.0],
 		[Vector3(-45, 0.1, 130), 0.0, -0.3, 10.0, "ducks", 40.0],
 		[Vector3(-15, 0.1, 9), 0.99, -0.12, 15.0, "truck", 60.0],
+		[Vector3(-90, 0.1, -120), 1.30, 0.22, 16.0, "castle_town", 50.0],
+		[Vector3(-200, 30, -110), "cam", Vector3(-290, 95, -175), 16.0, "castle_near", 55.0],
+		[Vector3(-262, 92, -165), "cam", Vector3(-298, 100, -178), 21.5, "castle_court", 70.0],
 		[Vector3(-31, 0.1, -5), -2.3, -0.12, 15.0, "truck_rear", 60.0],
 		[Vector3(-45, 0.1, 130), "duck", 0, 10.0, "drake", 20.0],
 		[Vector3(-45, 0.1, 130), "duck", 1, 10.0, "hen", 20.0],
@@ -460,6 +463,10 @@ func _screenshot_mode() -> void:
 				var d: Vector3 = sky.moon_dir
 				player.yaw = atan2(-d.x, -d.z)
 				player.pitch = asin(d.y)
+			elif s[1] is String and s[1] == "cam":   # free camera: from s[0] towards s[2]
+				player.set_physics_process(false)
+				player.set_process(false)
+				player.camera.global_transform = Transform3D(Basis(), s[0]).looking_at(s[2])
 			elif s[1] is String and s[1] == "duck":   # stand by the pond edge nearest a drake and look at it
 				var dd: Dictionary = ducks.lakes[0].sim[s[2]]
 				var dk: Node3D = dd.g
