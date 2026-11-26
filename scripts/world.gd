@@ -874,9 +874,8 @@ func _church() -> void:
 	b.cylinder(I, Vector3(CX, 34.2, 30.5), 4.0, 0.0, 29, 8, mats.copper)
 	bx(I, CX, 64.2, 30.5, 0.12, 2.4, 0.12, mats.brass)
 	bx(I, CX, 64.6, 30.5, 1.2, 0.12, 0.12, mats.brass)
-	# Door in the tower
-	bx(I, CX, 2.0, 25.98, 2.4, 4.0, 0.08, mats.dark_oak)
-	b.tri(I, Vector3(CX - 1.2, 4.0, 25.97), Vector3(CX + 1.2, 4.0, 25.97), Vector3(CX, 5.4, 25.97), mats.dark_oak, Vector3.FORWARD)
+	# Gothic west portal in the tower, stained glass round it, the great west window above (_church_portal)
+	_church_portal(CX, 26.0)
 	add_interactable(Vector3(CX, 1.6, 25.6), "[E] Look at St. Marien", "church",
 		func() -> Dictionary: return {"title": "St. Marien", "message": "A red sandstone Gothic church with a 63 m copper spire. Its bells and the inside come in a later version of the Godot port.", "sound": "click"})
 	# Nave
@@ -913,6 +912,92 @@ func _church() -> void:
 # ----------------------------------------------------------------------------------------------
 # Parcel Depot at the west end of the Ahornallee
 # ----------------------------------------------------------------------------------------------
+## St. Marien's west front (oldtown.js portal): a deep pointed arch in two stepped orders of pale sandstone,
+## oak doors with iron straps under a stained-glass tympanum, a carved gable (Wimperg) holding a small rose
+## window, a finial, tall lancets either side and the great west window above. Built facing -z at z = tz.
+func _church_portal(cx: float, tz: float) -> void:
+	var F := Transform3D(Basis(Vector3.UP, PI), Vector3(cx, 0, tz))   # local +z points out into the square
+	var pale: Material = mats.palestone
+	var PW := 2.6
+	var PH := 5.0
+	var arch := func(w: float, h: float, y0 := 0.0) -> PackedVector2Array:
+		return Castle.arch_pts(w, h - w * 0.866, w * 0.866, y0, 12)
+	# two stepped orders round the doorway
+	var o1: PackedVector2Array = arch.call(PW + 1.3, PH + 0.9)
+	var o2: PackedVector2Array = arch.call(PW + 0.65, PH + 0.45)
+	var o3: PackedVector2Array = arch.call(PW, PH)
+	b.strip(F * Transform3D(Basis(), Vector3(0, 0, 0.55)), o1, o2, pale, Vector3.BACK, 3.0)
+	b.ring_walls(F, o1, 0.55, pale, false, 3.0)
+	b.ring_walls(F, o2, 0.55, pale, false, 3.0, true, true)
+	b.strip(F * Transform3D(Basis(), Vector3(0, 0, 0.3)), o2, o3, pale, Vector3.BACK, 3.0)
+	b.ring_walls(F, o3, 0.3, pale, false, 3.0, true, true)
+	# oak doors up to the springing line, a stone transom, stained glass in the pointed head above
+	var spring := PH - PW * 0.866
+	b.polygon(F * Transform3D(Basis(), Vector3(0, 0, 0.02)), PackedVector2Array([Vector2(-PW / 2, 0.01), Vector2(PW / 2, 0.01), Vector2(PW / 2, spring), Vector2(-PW / 2, spring)]), mats.oak, 1.2)
+	var head := PackedVector2Array()
+	for q in o3:
+		if q.y >= spring - 0.001:
+			head.append(q)
+	b.polygon(F * Transform3D(Basis(), Vector3(0, 0, 0.02)), head, mats.church_glass[1], 1.0, false, Rect2(-PW / 2, spring, PW, PH - spring))
+	bx(F, 0, spring, 0.1, PW, 0.22, 0.2, pale, false, false)
+	b.cylinder(Transform3D(Basis(Vector3.RIGHT, PI / 2), F * Vector3(0, spring + 1.0, 0.04)), Vector3.ZERO, 0.42, 0.42, 0.06, 18, pale, true, 1.0, false)   # tracery ring
+	bx(F, 0, (spring - 0.1) / 2, 0.05, 0.06, spring - 0.1, 0.06, mats.iron, false, false)
+	for y in [0.6, 1.4, 2.2]:
+		bx(F, 0, y, 0.05, PW - 0.2, 0.09, 0.04, mats.iron, false, false)
+	for x in [-0.25, 0.25]:
+		bx(F, x, 1.2, 0.09, 0.08, 0.3, 0.08, mats.gilt, false, false)
+	# the Wimperg: a pointed stone gable over the arch with a round stained-glass rose in its opening
+	var gf := F * Transform3D(Basis(), Vector3(0, PH + 0.2, 0.1))
+	var outer := PackedVector2Array([Vector2(-2.4, 0), Vector2(0, 3.2), Vector2(2.4, 0)])
+	var inner := PackedVector2Array([Vector2(-1.5, 0.35), Vector2(0, 2.35), Vector2(1.5, 0.35)])
+	var gfront := gf * Transform3D(Basis(), Vector3(0, 0, 0.4))
+	b.strip(gfront, outer, inner, pale, Vector3.BACK, 3.0)
+	b.quad(gfront, Vector3(-2.4, 0, 0), Vector3(2.4, 0, 0), Vector3(1.5, 0.35, 0), Vector3(-1.5, 0.35, 0), pale, Vector3.BACK, 3.0)
+	b.ring_walls(gf, outer, 0.4, pale, false, 3.0)
+	var rose := PackedVector2Array()
+	for k in 24:
+		var a := TAU * k / 24
+		rose.append(Vector2(cos(a), sin(a)) * 0.62 + Vector2(0, 1.05))
+	b.polygon(gf * Transform3D(Basis(), Vector3(0, 0, 0.15)), rose, mats.church_glass[3], 1.0, false, Rect2(-0.62, 0.43, 1.24, 1.24))
+	b.cylinder(gf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3(0, 1.05, 0.2)), Vector3.ZERO, 0.7, 0.7, 0.08, 24, pale, false, 1.0, false)
+	for k in 4:   # tracery spokes across the rose
+		b.box(gf * Transform3D(Basis(Vector3.BACK, k * PI / 4), Vector3(0, 1.05, 0.18)), Vector3.ZERO, Vector3(1.24, 0.05, 0.05), pale, 1.0, false)
+	b.cylinder(Transform3D.IDENTITY, F * Vector3(0, PH + 3.3, 0.3), 0.22, 0.0, 0.9, 6, pale)   # finial
+	# tall stained-glass lancets either side of the doors
+	for u in [-2.8, 2.8]:
+		_church_window(F, u, 1.6, 0.55, 3.0, 0.14, 0.2, mats.church_glass[2], false)
+	# the great west window above the portal
+	_church_window(F, 0, 9.3, 2.0, 5.4, 0.32, 0.3, mats.church_glass[0], true)
+	# steps up to the doors
+	bx(F, 0, 0.08, 1.1, PW + 1.6, 0.16, 1.2, pale)
+	bx(F, 0, 0.08, 2.0, PW + 2.2, 0.16, 1.0, pale)
+
+
+## A pointed stained-glass window in a stone frame on facade frame F (oldtown.js churchWindow); the big one
+## gets a mullion and a ring of tracery in its head
+func _church_window(F: Transform3D, u: float, y: float, w: float, h: float, fw: float, fd: float, glass: Material, mullion: bool) -> void:
+	var f := F * Transform3D(Basis(), Vector3(u, y, 0))
+	var pale: Material = mats.palestone
+	var ow := w + 2 * fw
+	var outer := Castle.arch_pts(ow, h + fw * 1.4 - ow * 0.866, ow * 0.866, -fw * 0.5, 12)
+	var inner := Castle.arch_pts(w, h - w * 0.866, w * 0.866, 0.0, 12)
+	var front := f * Transform3D(Basis(), Vector3(0, 0, fd))
+	b.strip(front, outer, inner, pale, Vector3.BACK, 3.0, false)
+	b.quad(front, Vector3(outer[0].x, outer[0].y, 0), Vector3(outer[outer.size() - 1].x, outer[0].y, 0), Vector3(inner[inner.size() - 1].x, 0, 0), Vector3(inner[0].x, 0, 0), pale, Vector3.BACK, 3.0, false)
+	b.ring_walls(f, outer, fd, pale, true, 3.0, false)
+	b.ring_walls(f, inner, fd, pale, true, 3.0, false, true)
+	b.polygon(f * Transform3D(Basis(), Vector3(0, 0, 0.03)), inner, glass, 1.0, false, Rect2(-w / 2, 0, w, h))
+	if mullion:
+		var hs := h - w * 0.866
+		b.box(f, Vector3(0, hs / 2, 0.08), Vector3(0.12, hs, 0.12), pale, 1.0, false)
+		var tm := TorusMesh.new()
+		tm.inner_radius = w * 0.24 - 0.06
+		tm.outer_radius = w * 0.24 + 0.06
+		tm.rings = 20
+		tm.ring_segments = 6
+		b.mesh(f * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3(0, hs + w * 0.32, 0.08)), tm, pale, false)
+
+
 var depot_lights: Array[OmniLight3D] = []
 
 func _warehouse() -> void:

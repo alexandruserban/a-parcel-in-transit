@@ -873,6 +873,8 @@ func _screenshot_mode() -> void:
 		[Vector3(-30, 9, -230), "cam", Vector3(0, 0, -200), 15.0, "moat_bridge", 65.0],
 		[Vector3(150, 6, -205), "cam", Vector3(196, -1, -197), 15.0, "moat_corner", 65.0],
 		[Vector3(-45, 0.1, -10), PI, 0.5, 22.5, "church_night", 70.0],
+		[Vector3(-45, 1.7, 13), "cam", Vector3(-45, 6.5, 26), 11.0, "church_portal", 65.0],
+		[Vector3(-45, 1.7, 13), "cam", Vector3(-45, 6.5, 26), 22.5, "church_portal_night", 65.0],
 		[Vector3(-22, 0.1, 86), PI / 2 - 0.2, 0.05, 22.5, "park_night", 75.0],
 		[Vector3(-41, 0.1, 89), PI + 0.3, 0.02, 22.5, "park_night2", 75.0],
 		[Vector3(0, 0, 0), "house", Vector3(-4.0, 1.6, 6.0), 15.0, "living_room", 75.0],
