@@ -218,10 +218,10 @@ func _process(delta: float) -> void:
 	world.set_water_sky(sky.params, sky.sun_dir, sky.moon_dir, sky.moon_amt, sky.daylight(), sky.sun_visibility())
 	birds.update(delta, sky.daylight())
 	_update_stats(delta)
-	# St. Marien strikes the hour
+	# St. Marien strikes every third hour by day (6, 9, 12, 15, 18, 21) and keeps quiet at night
 	var whole := int(sky.hour) % 24
 	if started and whole != _bell_hour:
-		if _bell_hour != -1:
+		if _bell_hour != -1 and whole % 3 == 0 and whole >= 6 and whole <= 21:
 			sfx.strike_hour(whole)
 		_bell_hour = whole
 	_update_wind(delta)
@@ -685,15 +685,17 @@ func _smoke_test() -> void:
 		if pl.bus != sfx.FX_BUS:
 			off_bus += 1
 	var keep: float = sfx.effects_volume
-	sfx._apply_effects()
-	var db_full := AudioServer.get_bus_volume_db(fx_bus)
-	sfx.effects_volume = 0.5
-	sfx._apply_effects()
-	var db_half := AudioServer.get_bus_volume_db(fx_bus)
+	var db_at := func(v: float) -> float:
+		sfx.effects_volume = v
+		sfx._apply_effects()
+		return AudioServer.get_bus_volume_db(fx_bus)
+	var db70: float = db_at.call(0.7)
+	var db100: float = db_at.call(1.0)
+	var db35: float = db_at.call(0.35)
 	sfx.effects_volume = keep
 	sfx._apply_effects()
-	print("SMOKE: effects bus %d, players off it %d, music on %s, bus at 100%% %.1f dB, at 50%% %.1f dB" % [fx_bus, off_bus, sfx.music.bus, db_full, db_half])
-	assert(fx_bus > 0 and off_bus == 0 and sfx.music.bus == "Master")
+	print("SMOKE: effects bus %d, players off it %d, music on %s; effects at 35%% %.1f dB, 70%% %.1f dB, 100%% %+.1f dB; default %d%%" % [fx_bus, off_bus, sfx.music.bus, db35, db70, db100, int(sfx.FX_UNITY * 100)])
+	assert(fx_bus > 0 and off_bus == 0 and sfx.music.bus == "Master" and absf(db70) < 0.01 and db100 > 5.0)
 	print("SMOKE: footstep after the bells struck: %s" % ("plays" if playing > 0 else "SILENT"))
 	assert(playing > 0)
 	print("SMOKE: parcels %d -> %d, stored %d, score %d, backpack %d, player y %.2f" % [before, parcels.records.size(), parcels.stored_total(), score, backpack.size(), player.global_position.y])

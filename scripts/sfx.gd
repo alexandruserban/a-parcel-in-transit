@@ -9,7 +9,8 @@ const SETTINGS := "user://settings.cfg"
 
 var enabled := true
 var music_volume := 0.4
-var effects_volume := 1.0   # everything but the music, through the "Effects" bus
+var effects_volume := 0.7   # everything but the music, through the "Effects" bus (0.7 = full level, 1.0 = +6 dB)
+const FX_UNITY := 0.7       # the slider position that plays the effects at their own level
 const FX_BUS := "Effects"
 var night := false
 var streams := {}
@@ -35,11 +36,14 @@ func _ready() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(SETTINGS) == OK:
 		music_volume = clampf(cfg.get_value("audio", "music_volume", 0.4), 0.0, 1.0)
-		effects_volume = clampf(cfg.get_value("audio", "effects_volume", 1.0), 0.0, 1.0)
+		effects_volume = clampf(cfg.get_value("audio", "effects_level", FX_UNITY), 0.0, 1.0)   # new key: the scale changed
 	if AudioServer.get_bus_index(FX_BUS) < 0:
 		AudioServer.add_bus()
 		AudioServer.set_bus_name(AudioServer.bus_count - 1, FX_BUS)
 		AudioServer.set_bus_send(AudioServer.bus_count - 1, "Master")
+		var lim := AudioEffectHardLimiter.new()   # above 70 % the effects are boosted; keep peaks from clipping
+		lim.ceiling_db = -0.5
+		AudioServer.add_bus_effect(AudioServer.bus_count - 1, lim)
 	_apply_effects()
 	for i in 12:
 		var p := AudioStreamPlayer.new()
@@ -87,18 +91,20 @@ func set_effects_volume(v: float) -> void:
 	effects_volume = clampf(v, 0.0, 1.0)
 	var cfg := ConfigFile.new()
 	cfg.load(SETTINGS)
-	cfg.set_value("audio", "effects_volume", effects_volume)
+	cfg.set_value("audio", "effects_level", effects_volume)
 	cfg.save(SETTINGS)
 	_apply_effects()
 
 
-## The Effects bus follows the slider on the same curve as the music (squared, so the low end is usable)
+## The Effects bus follows the slider on a squared curve (so the low end is usable), at full level at 70 % and
+## about +6 dB at 100 %
 func _apply_effects() -> void:
 	var i := AudioServer.get_bus_index(FX_BUS)
 	if i < 0:
 		return
 	AudioServer.set_bus_mute(i, effects_volume <= 0.0)
-	AudioServer.set_bus_volume_db(i, linear_to_db(maxf(effects_volume * effects_volume, 0.0001)))
+	var g := effects_volume / FX_UNITY
+	AudioServer.set_bus_volume_db(i, linear_to_db(maxf(g * g, 0.0001)))
 
 
 func _apply_music() -> void:

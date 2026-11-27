@@ -907,7 +907,7 @@ func _church() -> void:
 	# Gothic west portal in the tower, stained glass round it, the great west window above (_church_portal)
 	_church_portal(CX, 26.0)
 	add_interactable(Vector3(CX, 1.6, 25.6), "[E] Ring the church bells", "church",
-		func() -> Dictionary: return {"title": "St. Marien", "message": "You heave on the bell rope and the peal rings out over the town. The bells also strike every hour.", "peal": 6})
+		func() -> Dictionary: return {"title": "St. Marien", "message": "You heave on the bell rope and the peal rings out over the town. The bells also strike the hour every three hours, from six in the morning to nine at night.", "peal": 6})
 	# Nave
 	bx(I, CX, 7, 48, 14, 14, 26, rs, true)
 	church_rects.append(rect(CX - 7, 35, CX + 7, 61))
