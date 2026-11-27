@@ -699,7 +699,7 @@ func _smoke_test() -> void:
 	sfx.footstep("pavement")
 	var playing := 0
 	for pl in sfx._pool + sfx.step_players:
-		if pl.playing and (pl.stream == sfx.streams.step_hard or pl.stream == sfx.step_streams.get("stone")):
+		if pl.playing and (pl.stream == sfx.streams.step_hard or pl.stream == sfx.step_streams.get("stone") or pl.stream in sfx.step_wavs.stone):
 			playing += 1
 	print("SMOKE: recorded footsteps loaded: %s" % str(sfx.step_streams.keys()))
 	# every sound but the music runs through the Effects bus, which the Effects slider turns down
