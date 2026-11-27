@@ -1294,8 +1294,9 @@ func _screenshot_mode() -> void:
 	_shots.append([Vector3(1.0, 1.4, 68.0), "cam", Vector3(5.4, 0.8, 60.0), 15.0, "truck_kerb", 60.0])
 	_shots.append([Vector3(-15.5, 2.2, 6.5), "cam", Vector3(-21.0, 0.5, 2.5), 22.5, "truck_rear_night", 65.0])
 	_shots.append([Vector3(-15.5, 2.2, 6.5), "cam", Vector3(-21.0, 0.5, 2.5), 22.5, "truck_rear_off", 65.0])
-	_shots.append([Vector3(-22.0, 4.5, 9.0), "cam", Vector3(-36.0, 0.0, 2.5), 22.5, "truck_front_night", 70.0])
-	_shots.append([Vector3(-22.0, 4.5, 9.0), "cam", Vector3(-36.0, 0.0, 2.5), 22.5, "truck_front_off", 70.0])
+	_shots.append([Vector3(-27.0, 7.0, 6.0), "cam", Vector3(-40.0, 0.0, 2.5), 22.5, "truck_front_night", 70.0])
+	_shots.append([Vector3(-27.0, 7.0, 6.0), "cam", Vector3(-40.0, 0.0, 2.5), 22.5, "truck_front_off", 70.0])
+	_shots.append([Vector3(-17.8, 1.7, 4.2), "cam", Vector3(-21.3, 1.6, 2.5), 22.5, "truck_door_night", 70.0])
 	_shots.append([Vector3(-58.0, 6.0, 46.0), "cam", Vector3(-45.0, 16.0, 46.0), 15.0, "church_side", 65.0])
 	_shots.append([Vector3(-25.0, 30.0, 12.0), "cam", Vector3(-45.0, 44.0, 30.5), 15.0, "church_spire", 55.0])
 	_shots.append([Vector3(-45.0, 1.7, 75.0), "cam", Vector3(-45.0, 20.0, 50.0), 15.0, "church_under", 70.0])
@@ -1316,6 +1317,8 @@ func _screenshot_mode() -> void:
 	for s in _shots:
 		if only.size() > 0 and not (s[4] in only):
 			continue
+		if s[4] == "truck_door_night" and truck.driving:   # on foot, walking up to the back
+			truck.exit()
 		if s[4] in ["truck_rear_night", "truck_rear_off", "truck_front_night", "truck_front_off"]:   # sit in the truck at night, to see the rear lamp
 			if not truck.driving:
 				truck.enter()
@@ -1337,6 +1340,7 @@ func _screenshot_mode() -> void:
 				truck.rear_beam.visible = false
 			if s[4] == "truck_front_off":
 				truck.beam.visible = false
+				truck.beam2.visible = false
 			if s[1] is String and s[1] == "moon":   # aim at the moon (zoomed in so the face shows)
 				var d: Vector3 = sky.moon_dir
 				player.yaw = atan2(-d.x, -d.z)

@@ -25,6 +25,7 @@ var wheels: Array = []                # [{pivot, spin, steerable}]
 var head_mat: StandardMaterial3D
 var tail_mat: StandardMaterial3D
 var beam: SpotLight3D
+var beam2: SpotLight3D              # the second headlight (no shadows, to keep it cheap)
 var rear_beam: SpotLight3D          # work lamp over the rear door: lights up behind the truck at night
 var rear_lamp_mat: StandardMaterial3D
 var cab_light: OmniLight3D
@@ -227,23 +228,34 @@ func _build_model() -> void:
 			spin.add_child(mi)
 			wheels.append({"pivot": pivot, "spin": spin, "steerable": w[2]})
 	# headlight beam (only at night while driving)
-	beam = SpotLight3D.new()
-	beam.light_color = Color("#fff1d6")
-	beam.spot_range = 45.0
-	beam.spot_angle = rad_to_deg(0.55)
-	beam.spot_angle_attenuation = 1.5
-	beam.shadow_enabled = true
-	var bp := Vector3(3.7, 1.3, 0)
-	beam.transform = Transform3D(Basis.looking_at(Vector3(14, 0, 0) - bp, Vector3.UP), bp)   # (look_at needs the tree)
-	beam.visible = false
-	add_child(beam)
+	# two headlight beams, one from each lamp, dipped to light the road from a few metres out to ~40 m
+	for s in [-1.0, 1.0]:
+		var hb := SpotLight3D.new()
+		hb.light_color = Color("#fff1d6")
+		hb.spot_range = 55.0
+		hb.spot_angle = 34.0
+		hb.spot_angle_attenuation = 0.7
+		hb.spot_attenuation = 0.6   # carries further down the road
+		hb.shadow_enabled = s < 0.0
+		var bp := Vector3(3.72, 1.35, s * 0.82)
+		hb.transform = Transform3D(Basis.looking_at(Vector3(20.0, 0.0, s * 1.6) - bp, Vector3.UP), bp)   # (look_at needs the tree)
+		hb.visible = false
+		add_child(hb)
+		if s < 0.0:
+			beam = hb
+		else:
+			beam2 = hb
 	rear_beam = SpotLight3D.new()
 	rear_beam.light_color = Color("#fff4e0")
 	rear_beam.spot_range = 18.0
 	rear_beam.spot_angle = 52.0
 	rear_beam.spot_angle_attenuation = 1.2
-	var rp := Vector3(-3.95, 3.15, 0)
-	rear_beam.transform = Transform3D(Basis.looking_at(Vector3(-9.0, 0.0, 0) - rp, Vector3.UP), rp)   # back and down
+	# a wide floodlight just outside the door, shining down over the door and the ground behind it
+	rear_beam.spot_range = 9.0
+	rear_beam.spot_angle = 62.0
+	rear_beam.spot_angle_attenuation = 0.8
+	var rp := Vector3(-4.02, 3.18, 0)
+	rear_beam.transform = Transform3D(Basis.looking_at(Vector3(-4.7, 0.0, 0) - rp, Vector3.UP), rp)
 	rear_beam.visible = false
 	add_child(rear_beam)
 
@@ -660,8 +672,7 @@ func exit() -> void:
 	game.sfx.stop_engine()
 	game.sfx.play("door_open", -6.0)
 	beam.visible = false
-	rear_beam.visible = false
-	rear_lamp_mat.emission_energy_multiplier = 0.0
+	beam2.visible = false
 
 
 func toggle_view() -> void:
@@ -811,16 +822,24 @@ func _physics_process(dt: float) -> void:
 	_sync()
 
 	# lights
-	var night: bool = game.is_night
+	# lights on from dusk (not only once the sun is well down)
+	var night: bool = game.is_night or game.sky.daylight() < 0.45
 	beam.visible = driving and night
+	beam2.visible = driving and night
 	cab_light.visible = driving and view == "cab"
-	beam.light_energy = 3.2
-	# the rear lamp: on at night while driving, full brightness when reversing
+	beam.light_energy = 12.0
+	beam2.light_energy = 12.0
+	# the door lamp: at night it lights the back door while you drive, or when you walk up to the back
 	var reversing := driving and speed < -0.3
-	rear_beam.visible = driving and night
-	rear_beam.light_energy = 7.0 if reversing else 3.5
-	rear_lamp_mat.emission_energy_multiplier = (3.0 if reversing else 1.6) if driving and night else 0.0
-	head_mat.emission_energy_multiplier = (2.5 if night else 0.6) if driving else 0.15
+	var rf := fwd()
+	var back := Vector3(pos.x - rf.x * 4.0, 0.0, pos.y - rf.y * 4.0)
+	var pp: Vector3 = game.player.global_position
+	var near_back := not driving and Vector2(pp.x - back.x, pp.z - back.z).length() < 9.0
+	var door_lit := night and (driving or near_back)
+	rear_beam.visible = door_lit
+	rear_beam.light_energy = 6.0 if reversing else 3.5
+	rear_lamp_mat.emission_energy_multiplier = (3.0 if reversing else 2.0) if door_lit else 0.0
+	head_mat.emission_energy_multiplier = (4.0 if night else 0.6) if driving else 0.15
 	# indicators blink on the side you're steering towards; hazards blink both while parked with cargo aboard
 	_blink += dt
 	var on := fmod(_blink, 0.8) < 0.4
