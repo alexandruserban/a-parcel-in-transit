@@ -105,9 +105,9 @@ func play(name: String, db := 0.0, pitch := 1.0) -> void:
 
 func footstep(surface: String, sprint := false) -> void:
 	if surface == "grass":
-		play("step_grass", -8.0 if sprint else -11.0, rng.randf_range(0.88, 1.12))
-	else:   # pavement, cobbles, floors: a soft tap
-		play("step_hard", -13.0 if sprint else -16.0, rng.randf_range(0.9, 1.1))
+		play("step_grass", -7.0 if sprint else -10.0, rng.randf_range(0.88, 1.12))
+	else:   # pavement, cobbles, floors: a clear heel click, a step louder than grass
+		play("step_hard", -2.0 if sprint else -5.0, rng.randf_range(0.92, 1.08))
 
 
 ## Rushing wind gust (playWindGust): the wind loop through its own player, swelling and fading over `duration`
@@ -141,41 +141,51 @@ func _update_gust(delta: float) -> void:
 	gust_player.pitch_scale = 1.0 + 1.4 * (t / 0.3 if t < 0.3 else maxf(0.0, 1.0 - (t - 0.3) / 0.7) * 0.8 + 0.2)
 
 
-## A bell strike (audio.js playChurchBells): a G3 bell's inharmonic partials - hum, prime, minor third,
-## fifth, nominal and up - each with its own long decay, plus the clapper's knock. D4 and B3 are the same
-## bell played faster. Runs on a worker thread at start-up.
+## A bell strike: a G bell's inharmonic partials - hum, prime, minor third, fifth, nominal (the note you hear,
+## G4), superquint and up - each ringing down on its own long decay. The main partials come in slightly
+## detuned pairs, so they beat slowly (the shimmer of a real bell), and the clapper's hit is a short metallic
+## ting of high partials rather than a knock. D and B are the same bell played faster. Built on a worker thread.
 func _build_bell() -> void:
 	var f := 196.0
-	var partials := [[0.5, 0.55, 7.0], [1.0, 0.8, 5.0], [1.183, 0.45, 3.6], [1.506, 0.3, 2.6], [2.0, 0.4, 2.2],
-		[2.514, 0.16, 1.5], [2.662, 0.12, 1.3], [3.011, 0.1, 1.0], [4.166, 0.05, 0.7]]
-	var n := int(5.5 * RATE)
+	# [ratio to the prime, amplitude, seconds to ring down, beat Hz (0 = single)]
+	var partials := [[0.5, 0.5, 9.0, 0.45], [1.0, 0.55, 7.0, 0.8], [1.2, 0.5, 6.0, 1.1], [1.5, 0.22, 4.0, 0.0],
+		[2.0, 0.9, 6.0, 1.3], [2.5, 0.25, 3.2, 0.0], [2.67, 0.35, 3.5, 1.7], [3.0, 0.3, 2.8, 0.0],
+		[4.0, 0.2, 2.0, 0.0], [5.33, 0.12, 1.3, 0.0], [6.4, 0.08, 0.8, 0.0],
+		[7.3, 0.14, 0.14, 0.0], [8.9, 0.11, 0.1, 0.0], [11.2, 0.08, 0.07, 0.0]]
+	var n := int(8.0 * RATE)
 	var s := PackedFloat32Array()
 	s.resize(n)
+	var osc := []   # [hz, amp, seconds]
 	for p in partials:
-		var w: float = TAU * f * p[0] / RATE
-		var amp: float = p[1] * 0.22
-		var k: float = log(0.0001) / (p[2] * RATE)   # exponential decay to -80 dB over d seconds
+		if p[3] > 0.0:
+			osc.append([f * p[0] - p[3] * 0.5, p[1] * 0.6, p[2]])
+			osc.append([f * p[0] + p[3] * 0.5, p[1] * 0.45, p[2] * 0.9])
+		else:
+			osc.append([f * p[0], p[1], p[2]])
+	for o in osc:
+		var w: float = TAU * o[0] / RATE
+		var k: float = log(0.0005) / (o[2] * RATE)   # exponential decay to -66 dB over its time
 		var c := cos(w)
 		var sn := sin(w)
 		var x := 0.0   # sine by rotation (no sin() per sample)
 		var y := 1.0
-		var g := amp
+		var g: float = o[1]
 		var decay := exp(k)
-		for i in mini(n, int(p[2] * RATE)):
+		var attack := 30.0 if o[0] > 1000.0 else 90.0
+		for i in mini(n, int(o[2] * RATE)):
 			var nx := x * c + y * sn
 			y = y * c - x * sn
 			x = nx
-			s[i] += x * g * minf(1.0, i / 88.0)
+			s[i] += x * g * minf(1.0, i / attack)
 			g *= decay
-	var r := RandomNumberGenerator.new()
-	var lp := 0.0
-	for i in int(0.04 * RATE):   # clapper
-		lp += 0.5 * ((r.randf() * 2.0 - 1.0) - lp)
-		s[i] += lp * 0.15 * (1.0 - i / (0.04 * RATE))
+	var m := 0.0
+	for v in s:
+		m = maxf(m, absf(v))
+	var gain := 0.95 / maxf(m, 0.0001)
 	var data := PackedByteArray()
 	data.resize(n * 2)
 	for i in n:
-		data.encode_s16(i * 2, int(clampf(s[i] * 1.4, -1.0, 1.0) * 32767.0))
+		data.encode_s16(i * 2, int(clampf(s[i] * gain, -1.0, 1.0) * 32767.0))
 	var wav := AudioStreamWAV.new()
 	wav.format = AudioStreamWAV.FORMAT_16_BITS
 	wav.mix_rate = RATE
@@ -188,8 +198,9 @@ func hang_bells(parent: Node, at: Vector3) -> void:
 	for i in 4:
 		var p := AudioStreamPlayer3D.new()
 		p.position = at
-		p.unit_size = 45.0
-		p.max_distance = 900.0
+		p.unit_size = 90.0          # full strength within ~90 m of the tower, still clear across town
+		p.max_distance = 1200.0
+		p.max_db = 8.0
 		p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
 		p.panning_strength = 0.6
 		parent.add_child(p)
@@ -228,7 +239,7 @@ func _update_bells(delta: float) -> void:
 		_next += 1
 		p.stream = bell_stream
 		p.pitch_scale = e.pitch
-		p.volume_db = e.db
+		p.volume_db = e.db + 6.0
 		p.play()
 
 
@@ -303,6 +314,14 @@ func _amp(s: PackedFloat32Array, k: float) -> PackedFloat32Array:
 	return s
 
 
+## Scale a sound so its loudest sample reaches `peak`
+func _normalize(s: PackedFloat32Array, peak: float) -> PackedFloat32Array:
+	var m := 0.0
+	for v in s:
+		m = maxf(m, absf(v))
+	return _amp(s, peak / m) if m > 0.0 else s
+
+
 func _buf(seconds: float) -> PackedFloat32Array:
 	var a := PackedFloat32Array()
 	a.resize(int(seconds * RATE))
@@ -365,8 +384,26 @@ func _build() -> void:
 		tph += (260.0 * pow(80.0 / 260.0, minf(t / 0.07, 1.0))) / RATE
 		var tri_w := 4.0 * absf(tph - floorf(tph + 0.5)) - 1.0
 		tap[i] = (tri_w * 0.55 + (rng.randf() * 2.0 - 1.0) * 0.06) * exp(-t * 55.0) * minf(1.0, t * 800.0)
-	streams.step_hard = _wav(_biquad(tap, "low", 1400.0, 0.707))
-	streams.step_grass = _wav(_noise_burst(0.14, 26.0, 0.12, 1.6, 0.15, 70.0))
+	# pavement: a muffled footfall - a soft thump with a dull scuff of low-passed noise, eased in so it doesn't click
+	var fall := _buf(0.13)
+	for i in fall.size():
+		var t := float(i) / RATE
+		fall[i] = (rng.randf() * 2.0 - 1.0) * exp(-t * 38.0) * minf(1.0, t / 0.004)
+	fall = _biquad(_biquad(fall, "low", 750.0, 0.6), "low", 750.0, 0.6)
+	var thump := _biquad(tap, "low", 500.0, 0.707)
+	for i in fall.size():
+		fall[i] = fall[i] * 1.6 + (thump[i] if i < thump.size() else 0.0) * 1.2
+	streams.step_hard = _wav(_normalize(fall, 0.9))
+	# grass: a soft rustle (noise round 1.6 kHz, eased in and out) with a dull thud under it
+	var brush := _buf(0.2)
+	for i in brush.size():
+		var t := float(i) / RATE
+		brush[i] = (rng.randf() * 2.0 - 1.0) * minf(1.0, t / 0.02) * exp(-t * 16.0)
+	brush = _biquad(brush, "band", 1600.0, 0.8)
+	for i in brush.size():
+		var t := float(i) / RATE
+		brush[i] += 0.25 * sin(TAU * 70.0 * t) * exp(-t * 30.0) * minf(1.0, t * 400.0)
+	streams.step_grass = _wav(_normalize(brush, 0.8))
 	streams.jump = _wav(_noise_burst(0.16, 18.0, 0.08, 1.2))
 	streams.land = _wav(_noise_burst(0.2, 22.0, 0.1, 1.2, 0.6, 65.0))
 	streams.click = _wav(_noise_burst(0.02, 300.0, 0.6, 0.9))

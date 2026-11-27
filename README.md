@@ -14,7 +14,8 @@ A Godot 4.7 port of the Three.js / WebView game in `../tidyup`. It is a first-pe
   `Godot_v4.7.2-stable_win64_console.exe --path . -- --drive <folder>`
 - **Stairs test** (opens a front door, walks in and up to the landing):
   `Godot_v4.7.2-stable_win64_console.exe --headless --path . -- --stairs`
-- **Gust test** (starts a gust, checks every loose parcel lands somewhere new): `... --path . -- --gust <folder>`
+- **Kerb test** (walks onto a pavement head-on and at two slants, and back down): `... --headless --path . -- --kerb`
+- **Gust test** (starts a gust, checks every loose parcel lands somewhere new, none flies through a roof and none sinks into a plinth or another parcel): `... --path . -- --gust <folder>`
 - **Moat test** (walks out over the drawbridge and back, raises it): `... --headless --path . -- --moat`
 - **Save test** (plays a little and saves to a separate test file, then loads it back and reports): `... --headless --path . -- --savetest write`, then `... -- --savetest read`
 
@@ -67,6 +68,8 @@ Then open the project once (or run `--import`) so Godot re-imports them. The `_n
 | `scripts/castle.gd` | castle.js | The castle crag, walls, towers, gatehouse, keep, Palas, banner, track and slope forest |
 | `scripts/truck.gd` | truck.js | The drivable delivery truck |
 | `scripts/moat.gd` | moat.js | The moat, drawbridge and bridgehead |
+| `scripts/vines.gd` + `shaders/vine_leaf.gdshader`, `shaders/green_wall.gdshader` | (new) | Grapevines on the town side of the city wall: trunks, cordons, shoots, vine leaves and bunches of grapes, in front of two layers of leaf cover that turn the whole face into a green wall |
+| `shaders/fresco_tiles.gdshader` | (new) | Renaissance majolica picture tiles on the house fronts (six motifs, glazed tiles with grout) |
 | `scripts/lights.gd` | (new) | Church tower floodlights and the park's carnival festoons |
 | `scripts/ducks.gd`, `scripts/birds.gd` | ducks.js, birds.js | Mallards on the ponds; bird flocks and hawks |
 | `scripts/batch.gd` | `batchStatic()` | Merges static geometry into one mesh per material and chunk; also polygons, prisms, arch frames and any mesh, with optional vertex colours |

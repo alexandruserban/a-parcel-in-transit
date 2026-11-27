@@ -462,6 +462,7 @@ func build(idx: int, xf: Transform3D, st: Dictionary, cfg: Dictionary, wall: Mat
 			_fachwerk(xf, st, roof)
 		_gable_windows(xf, st, roof)
 	_front_details(xf, st, idx)
+	_frescoes(xf, st, idx)
 	_entrance(xf, st)
 	_front_door(xf, st)
 	_garage(xf, wall, idx, st)
@@ -1287,6 +1288,58 @@ func _front_details(g: Transform3D, st: Dictionary, idx: int) -> void:
 				wall_box(g, "right" if s > 0 else "left", 7 - long2 / 2, v + 0.22, T / 2 + 0.015, long2, 0.44, 0.03, m)
 			v += 0.5
 			kk += 1
+
+
+## Renaissance picture tiles (fresco_tiles.gdshader) in stone frames on the plastered or stone parts of the
+## front: between the upper windows of Gothic and plain houses, a wide panel over each ground-floor window of
+## plain houses, beside the door of houses timbered only upstairs. Most houses that have room get a pair.
+const FRESCO_PORTRAIT := [0, 1, 4, 3, 5, 2]
+const FRESCO_WIDE := [5, 3, 2]
+var _fresco_mats := {}
+
+func _fresco_mat(motif: int, pw: float, ph: float) -> ShaderMaterial:
+	var key := "%d_%.2f_%.2f" % [motif, pw, ph]
+	if not _fresco_mats.has(key):
+		var m := ShaderMaterial.new()
+		m.shader = preload("res://shaders/fresco_tiles.gdshader")
+		m.set_shader_parameter("motif", motif)
+		m.set_shader_parameter("aspect", pw / ph)
+		m.set_shader_parameter("size_m", Vector2(pw, ph))
+		m.set_shader_parameter("has_normal", true)
+		_fresco_mats[key] = m
+	return _fresco_mats[key]
+
+
+func _frescoes(g: Transform3D, st: Dictionary, idx: int) -> void:
+	if w.jhash(idx, 21, 77) > 0.78:
+		return
+	var spots := []   # [u, centre v, width, height]
+	match st.frame:
+		"gothic":
+			spots = [[-2.25, 5.5, 1.0, 1.4], [2.25, 5.5, 1.0, 1.4]]
+		"none":
+			spots = [[-2.25, 5.35, 0.8, 1.2], [2.25, 5.35, 0.8, 1.2], [-2.25, 3.8, 1.7, 0.9], [2.25, 3.8, 1.7, 0.9]]
+		"upper":
+			spots = [[-2.1, 1.85, 0.8, 1.2], [2.1, 1.85, 0.8, 1.2]]
+		_:
+			return
+	var fm: Material = w.mats.palestone if st.gothic else w.mats.sandstone
+	var k0 := int(w.jhash(idx, 22, 77) * 6.0)
+	var fw := 0.08
+	for i in spots.size():
+		var sp: Array = spots[i]
+		var u: float = sp[0]
+		var vc: float = sp[1]
+		var pw: float = sp[2]
+		var ph: float = sp[3]
+		var wide := pw > ph
+		var motif: int = FRESCO_WIDE[(k0 + i) % FRESCO_WIDE.size()] if wide else FRESCO_PORTRAIT[(k0 + i) % FRESCO_PORTRAIT.size()]
+		var z := D / 2
+		obox(g, pw + 2 * fw, fw, 0.05, u, vc + ph / 2 + fw / 2, z + 0.025, fm, false)                 # head
+		obox(g, pw + 2 * fw + 0.08, fw + 0.02, 0.09, u, vc - ph / 2 - fw / 2 - 0.01, z + 0.045, fm, false)   # sill
+		for s in [-1.0, 1.0]:
+			obox(g, fw, ph, 0.05, u + s * (pw / 2 + fw / 2), vc, z + 0.025, fm, false)
+		picture(g * Transform3D(Basis(), Vector3(u, vc, z + 0.012)), pw, ph, _fresco_mat(motif, pw, ph), be)
 
 
 ## Front step and a little tiled door canopy on brackets

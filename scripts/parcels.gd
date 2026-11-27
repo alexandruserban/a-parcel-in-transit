@@ -156,13 +156,15 @@ func prompt_for(rec: Dictionary) -> String:
 # ------------------------------------------------------------------------------------------------
 var flights: Array = []
 const BOUNCE_TIME := 0.9   # seconds a landing parcel hops before it settles
+const CLIMB := 16.0        # m/s a flying parcel can rise to clear a roof ahead
+const SINK := 9.0          # m/s it eases back down after
 
 
 func _landing_spot(range_m := 140.0) -> Vector2:
 	for t in 40:
 		var x := rng.randf_range(-range_m, range_m)
 		var z := rng.randf_range(-range_m, range_m)
-		if world.house_at(x, z) or world.in_warehouse(x, z, 2.0):
+		if world.house_at(x, z) or world.in_warehouse(x, z, 2.0) or world._near_tree(x, z, 1.0):
 			continue
 		if _free_spot(x, z, 0.6):
 			return Vector2(x, z)
@@ -183,6 +185,45 @@ func start_gust() -> int:
 	return flights.size()
 
 
+## How high a flying parcel must stay over (x, z): roofs, walls, towers. Cached on a 2 m grid.
+var _clear_cache := {}
+func _clearance(x: float, z: float) -> float:
+	var key := Vector2i(floori(x / 2.0), floori(z / 2.0))
+	if _clear_cache.has(key):
+		return _clear_cache[key]
+	var cx := (key.x + 0.5) * 2.0
+	var cz := (key.y + 0.5) * 2.0
+	var top := 0.0
+	for o in [Vector2.ZERO, Vector2(-1.4, -1.4), Vector2(1.4, -1.4), Vector2(1.4, 1.4), Vector2(-1.4, 1.4)]:
+		top = maxf(top, world.roof_top_at(cx + o.x, cz + o.y))   # the highest point of the roof over the cell
+	for sd in world.solids_near(cx, cz, 1.6):
+		if world.in_rect(sd.rect, cx, cz, 1.6):
+			top = maxf(top, sd.top)
+	_clear_cache[key] = top
+	return top
+
+
+## Where a flight is over the ground at time t (0..1): along the path with a sideways swirl
+static func _flight_xz(f: Dictionary, t: float) -> Vector2:
+	var e := t * t * (3.0 - 2.0 * t)
+	var from: Vector3 = f.from
+	var to: Vector3 = f.to
+	var p := Vector2(lerpf(from.x, to.x, e), lerpf(from.z, to.z, e))
+	var path := Vector2(to.x - from.x, to.z - from.z).normalized()
+	return p + Vector2(-path.y, path.x) * sin(t * TAU) * f.swirl * (1.0 - t)
+
+
+## Where a parcel comes to rest at (x, z): on the ground, a low plinth or pedestal, or another parcel
+func _rest_y(rec: Dictionary, x: float, z: float, below := INF) -> float:
+	var S: Dictionary = SIZES[rec.size]
+	var hx: float = maxf(S.w, S.d) * 0.45
+	var top := _support_top(x, z, hx, hx, rec, below)
+	for sd in world.solids_near(x, z, hx):
+		if sd.top < 1.2 and world.in_rect(sd.rect, x, z, hx - 0.05):
+			top = maxf(top, sd.top)
+	return top + S.h / 2 + 0.01
+
+
 ## gust_t: seconds since the gust began; gust: its strength 0..1
 func update_gust(gust_t: float, gust: float, dt: float) -> void:
 	if flights.is_empty():
@@ -201,7 +242,20 @@ func update_gust(gust_t: float, gust: float, dt: float) -> void:
 		if t >= 1.0:
 			if rec.flying:
 				var to: Vector3 = f.to
-				var rest_y: float = world.ground_y_at(to.x, to.z) + h / 2 + 0.01
+				if not f.has("rest_y"):
+					var S0: Dictionary = SIZES[rec.size]
+					rec.hx = maxf(S0.w, S0.d) * 0.45
+					rec.hz = rec.hx
+					rec.pos = Vector3(to.x, rec.pos.y, to.z)
+					f.rest_y = _rest_y(rec, to.x, to.z)
+					rec.rest_y = f.rest_y   # others landing here now stack on it
+				var rest_y: float = f.rest_y
+				if not f.has("land_t") and f.get("y", rest_y) > rest_y + 0.02:   # still above it (it cleared a roof): drop
+					f.vy = f.get("vy", 0.0) - 22.0 * dt
+					f.y = maxf(rest_y, f.y + f.vy * dt)
+					rec.pos = Vector3(to.x, f.y, to.z)
+					_mm[rec.size].set_instance_transform(rec.slot, Transform3D(f.basis, rec.pos))
+					continue
 				if not f.has("land_t"):   # touch down: pick the resting yaw, then bounce
 					f.land_t = gust_t
 					f.yaw = rng.randf() * PI
@@ -221,16 +275,25 @@ func update_gust(gust_t: float, gust: float, dt: float) -> void:
 				rec.hx = maxf(S.w, S.d) * 0.45
 				rec.hz = rec.hx
 				rec.flying = false
+				rec.erase("rest_y")
 				_mm[rec.size].set_instance_transform(rec.slot, Transform3D(Basis(Vector3.UP, rec.rot), rec.pos))
 			done += 1
 			continue
-		var e := t * t * (3.0 - 2.0 * t)
-		var from: Vector3 = f.from
-		var to2: Vector3 = f.to
-		var p := from.lerp(Vector3(to2.x, from.y, to2.z), e)
-		var path := Vector3(to2.x - from.x, 0, to2.z - from.z).normalized()
-		p += Vector3(-path.z, 0, path.x) * sin(t * TAU) * f.swirl * (1.0 - t)
-		p.y = h / 2 + f.apex * 4.0 * t * (1.0 - t) + sin(t * 17.0) * 0.4 * (1.0 - t)
+		var xz := _flight_xz(f, t)
+		var p := Vector3(xz.x, 0, xz.y)
+		var from_y: float = (f.from as Vector3).y
+		p.y = lerpf(from_y, h / 2, t) + f.apex * 4.0 * t * (1.0 - t) + sin(t * 17.0) * 0.4 * (1.0 - t)
+		# keep clear of roofs and walls: look a little ahead and climb in time (at most CLIMB m/s), sink slowly after
+		var need := 0.0
+		for k in 5:
+			var tk := minf(t + k * 0.03, 1.0)
+			var q := _flight_xz(f, tk)
+			var c := _clearance(q.x, q.y)
+			if c > 0.0:
+				need = maxf(need, c + h / 2 + 0.5 - k * 0.03 * f.dur * CLIMB)
+		f.need = maxf(need, f.get("need", 0.0) - SINK * dt)
+		p.y = maxf(p.y, f.need)
+		f.y = p.y
 		var sp: Vector3 = f.spin * dt
 		f.basis = (f.basis * Basis.from_euler(sp)).orthonormalized()
 		rec.pos = p
@@ -270,8 +333,13 @@ func _support_top(x: float, z: float, hx: float, hz: float, ignore, below := INF
 	for p in records:
 		if p == ignore:
 			continue
+		var py: float = p.pos.y
+		if p.get("flying", false):   # in the air it holds nothing up, unless it has touched down and is settling
+			if not p.has("rest_y"):
+				continue
+			py = p.rest_y
 		if absf(p.pos.x - x) < p.hx + hx - 0.03 and absf(p.pos.z - z) < p.hz + hz - 0.03:
-			var t: float = p.pos.y + SIZES[p.size].h / 2
+			var t: float = py + SIZES[p.size].h / 2
 			if t > top and t <= below:
 				top = t
 	return top
@@ -404,7 +472,7 @@ func save_state() -> Dictionary:
 		var p: Vector3 = rec.pos
 		if landing.has(rec):
 			var to: Vector3 = landing[rec]
-			p = Vector3(to.x, world.ground_y_at(to.x, to.z) + SIZES[rec.size].h / 2 + 0.01, to.z)
+			p = Vector3(to.x, _rest_y(rec, to.x, to.z), to.z)
 		loose.append([rec.size, snappedf(p.x, 0.001), snappedf(p.y, 0.001), snappedf(p.z, 0.001), snappedf(rec.rot, 0.001)])
 	return {"total": total, "loose": loose, "stored": Array(stored_order)}
 

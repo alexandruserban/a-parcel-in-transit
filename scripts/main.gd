@@ -133,7 +133,7 @@ func _ready() -> void:
 	if "--savetest" in OS.get_cmdline_user_args():
 		SAVE_PATH = "user://save_test.json"   # never touch the real save
 	test_mode = false
-	for a in ["--smoke", "--shot", "--drive", "--stairs", "--gust", "--moat"]:
+	for a in ["--smoke", "--shot", "--drive", "--stairs", "--gust", "--moat", "--kerb"]:
 		if a in OS.get_cmdline_user_args():
 			test_mode = true
 	if not test_mode:
@@ -161,6 +161,9 @@ func _ready() -> void:
 		return
 	if "--stairs" in OS.get_cmdline_user_args():
 		_stairs_test()
+		return
+	if "--kerb" in OS.get_cmdline_user_args():
+		_kerb_test()
 		return
 	if "--drive" in OS.get_cmdline_user_args():
 		_drive_test()
@@ -761,14 +764,40 @@ func _gust_test() -> void:
 		if not r.stored:
 			loose.append([r, r.pos])
 	start_gust()
-	await get_tree().create_timer(4.0).timeout
+	# watch the flights: none may pass through a roof
+	var through := {}
+	var watch := func() -> void:
+		for r in parcels.records:
+			if r.get("flying", false):
+				var bottom: float = r.pos.y - parcels.SIZES[r.size].h / 2
+				var roof: float = world.roof_top_at(r.pos.x, r.pos.z) - 0.4
+				if world.house_at(r.pos.x, r.pos.z) and bottom < roof - 0.3:
+					through[r] = true
+	var t0 := Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 4000:
+		await get_tree().process_frame
+		watch.call()
 	var flying := 0
 	for r in parcels.records:
 		if r.get("flying", false):
 			flying += 1
 	var args := OS.get_cmdline_user_args()
 	get_viewport().get_texture().get_image().save_png(args[args.find("--gust") + 1].path_join("shot_gust.png"))
-	await get_tree().create_timer(16.0).timeout
+	t0 = Time.get_ticks_msec()
+	while Time.get_ticks_msec() - t0 < 16000:
+		await get_tree().process_frame
+		watch.call()
+	# and none may end up sunk into a pedestal, plinth or another parcel
+	var sunk := 0
+	for r in parcels.records:
+		if r.stored:
+			continue
+		var under: float = parcels._rest_y(r, r.pos.x, r.pos.z, r.pos.y - parcels.SIZES[r.size].h / 2 + 0.02)   # what is beneath it only
+		if r.pos.y < under - 0.05:
+			sunk += 1
+			if sunk <= 4:
+				print("GUST: sunk %s at %s, should rest at y %.2f" % [r.size, r.pos, under])
+	print("GUST: %d flew through a roof, %d landed sunk into something" % [through.size(), sunk])
 	var moved := 0
 	var still := 0
 	for e in loose:
@@ -817,6 +846,39 @@ func _stairs_test() -> void:
 	await get_tree().create_timer(0.5).timeout
 	print("STAIRS: upstairs landing at y %.2f (upper floor is %.2f)" % [player.global_position.y, hp.UP])
 	get_tree().quit()
+
+
+## Walk from the Ulmenstraße onto its pavement at walking speed, head-on and at a slant, and off again
+func _kerb_test() -> void:
+	get_tree().paused = false
+	hud.show_menu(false)
+	var ok := true
+	for case in [[Vector3(2.0, 0.1, 60.0), Vector3(1, 0, 0)], [Vector3(2.0, 0.1, 80.0), Vector3(1, 0, 0.7)], [Vector3(2.0, 0.1, 100.0), Vector3(1, 0, -1.6)]]:
+		player.global_position = case[0]
+		player.yaw = 0.0
+		for i in 10:
+			await get_tree().physics_frame
+		var d: Vector3 = (case[1] as Vector3).normalized()
+		player.move_input = Vector2(d.x, d.z)
+		var t := 0.0
+		var top := 0.0
+		while t < 1.2:
+			await get_tree().physics_frame
+			t += get_physics_process_delta_time()
+			top = maxf(top, player.global_position.y)
+		player.move_input = Vector2.ZERO
+		var p: Vector3 = player.global_position
+		var up: bool = top > 0.2 and p.x > 6.0
+		ok = ok and up
+		print("KERB: from x %.1f heading (%.1f, %.1f): reached x %.2f, highest y %.2f %s" % [case[0].x, d.x, d.z, p.x, top, "climbed the kerb" if up else "STUCK"])
+	# and back down onto the road
+	player.move_input = Vector2(-1, 0)
+	for i in 60:
+		await get_tree().physics_frame
+	player.move_input = Vector2.ZERO
+	print("KERB: back on the road at x %.2f, y %.2f" % [player.global_position.x, player.global_position.y])
+	print("KERB: %s" % ("ok" if ok else "FAILED"))
+	get_tree().quit(0 if ok else 1)
 
 
 ## Get in the truck, hold W for 3 s (then W+A), screenshot the chase camera, stop and get out
@@ -913,6 +975,23 @@ func _screenshot_mode() -> void:
 		[Vector3(-45, 0.1, 130), "duck", 0, 10.0, "drake", 20.0],
 		[Vector3(-45, 0.1, 130), "duck", 1, 10.0, "hen", 20.0],
 		[Vector3(0, 0.1, 30), "moon", 0.0, 23.0, "moonwide", 75.0],
+		[Vector3(-25.6, 0.9, 5.9), "cam", Vector3(-27.55, 0.45, 3.5), 15.0, "truck_wheel", 50.0],
+		[Vector3(-20.6, 0.9, 6.2), "cam", Vector3(-22.7, 0.45, 3.7), 15.0, "truck_rwheel", 50.0],
+		[Vector3(0.0, 3.8, 7.0), "hcam", Vector3(0.0, 1.8, 18.0), 14.0, "fresco_gothic", 60.0, 3],
+		[Vector3(0.0, 3.8, 7.0), "hcam", Vector3(0.0, 1.8, 18.0), 14.0, "fresco_plain", 60.0, 7],
+		[Vector3(0.0, 2.6, 7.0), "hcam", Vector3(1.0, 1.7, 13.0), 14.0, "fresco_upper", 60.0, 14],
+		[Vector3(-2.25, 4.4, 7.0), "hcam", Vector3(-1.6, 2.4, 10.5), 14.0, "fresco_close", 55.0, 7],
+		[Vector3(-2.25, 5.3, 7.0), "hcam", Vector3(-2.0, 4.2, 10.0), 14.0, "fresco_close2", 50.0, 12],
+		[Vector3(40, 1.7, 168), "cam", Vector3(52, 3.5, 185), 15.0, "wall_vines", 65.0],
+		[Vector3(96, 1.6, 180.5), "cam", Vector3(99, 2.6, 185), 15.0, "wall_vines_near", 60.0],
+		[Vector3(170, 2.0, 40), "cam", Vector3(185, 5.0, 25), 10.0, "wall_east", 65.0],
+		[Vector3(14, 2.0, -158), "cam", Vector3(0, 13.0, -182), 15.0, "nordtor_town", 60.0],
+		[Vector3(26, 7, -222), "cam", Vector3(0, 13.0, -191), 15.0, "nordtor_moat", 60.0],
+		[Vector3(0.5, 1.7, -186.0), "cam", Vector3(0.8, 12.0, -185.0), 15.0, "nordtor_under", 75.0],
+		[Vector3(0, 14.0, -172.0), "cam", Vector3(0, 17.0, -181.5), 15.0, "clock_nordtor", 45.0],
+		[Vector3(-34, 27.0, 52.0), "cam", Vector3(-45, 23.5, 35.0), 15.0, "clock_church", 40.0],
+		[Vector3(9.0, 1.7, -178.0), "cam", Vector3(6.5, 22.0, -181.5), 15.0, "nordtor_turret", 70.0],
+		[Vector3(14, 2.0, -158), "cam", Vector3(0, 13.0, -182), 22.5, "nordtor_night", 60.0],
 	]
 	# `--only a,b` renders just the named views
 	var args := OS.get_cmdline_user_args()

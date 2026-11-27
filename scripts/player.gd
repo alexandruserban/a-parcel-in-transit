@@ -165,27 +165,37 @@ func _physics_process(delta: float) -> void:
 		head.position = Vector3(0, eye, 0)
 
 
-## Climb kerbs and steps: lift, move, and settle back down if the way is clear up there
+## Climb kerbs and steps: lift, look for the top of the step a little ahead, and step up onto it.
+## One frame's move is only ~10 cm, which leaves the round foot of the capsule resting on the step's edge
+## (a slanted contact that reads as a wall), so the top is probed most of a capsule radius ahead instead.
 func _try_step(motion: Vector3) -> bool:
 	var t := global_transform
-	if not test_move(t, motion):
+	var flat := Vector3(motion.x, 0, motion.z)
+	if flat.length() < 0.0001 or not test_move(t, flat):
 		return false
 	var up := Vector3(0, STEP, 0)
 	if test_move(t, up):
 		return false
-	t.origin += up
-	if test_move(t, motion):
+	var dir := flat.normalized()
+	var probe := dir * maxf(flat.length(), capsule.radius * 0.9)
+	var raised := t
+	raised.origin += up
+	if test_move(raised, probe):
 		return false
-	t.origin += motion
+	var ahead := raised
+	ahead.origin += probe
 	var col := KinematicCollision3D.new()
-	if not test_move(t, Vector3(0, -STEP - 0.05, 0), col):
+	if not test_move(ahead, Vector3(0, -STEP - 0.05, 0), col):
 		return false
 	if col.get_normal().y < 0.7:
 		return false
-	t.origin += col.get_travel()
-	if t.origin.y - global_position.y < 0.03:
+	var rise := STEP + col.get_travel().y   # travel is negative: how far down the top of the step is
+	if rise < 0.03 or rise > STEP:
 		return false
-	global_transform = t
+	# move this frame's distance, lifted onto the step (plus a hair, so we don't start inside it)
+	var dest := t
+	dest.origin += flat + Vector3(0, rise + 0.02, 0)
+	global_transform = dest
 	return true
 
 

@@ -78,8 +78,8 @@ func _build_model() -> void:
 	var glass := _std(Color(Color("#9db3bf"), 0.16), 0.03, 0.2)   # clear enough to see the cab inside
 	glass.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
 	glass.cull_mode = BaseMaterial3D.CULL_DISABLED
-	var rubber := _std(Color("#151515"), 0.9)
-	var hub := _std(Color("#b8bcc0"), 0.3, 0.9)
+	var rubber := _std(Color("#1b1b1c"), 0.88)
+	var hub := _std(Color("#c4c7ca"), 0.38, 0.55)   # painted steel rims
 	var door := _std(Color("#d8dbde"), 0.35, 0.5)
 	var grille := _std(Color("#8c9196"), 0.3, 0.8)
 	head_mat = _std(Color("#f6f4ea"), 0.2)
@@ -116,7 +116,8 @@ func _build_model() -> void:
 	B.call(0.06, 0.06, 2.3, dark, -3.74, 3.32, 0)
 	# cab: body, roof fairing, stripe, windscreen, side windows, grille
 	# (faces that would cut through the cab interior are left out: _cab_interior lines it from inside)
-	B.call(1.62, 1.25, 2.3, [null, paint, null, paint, paint, paint], 2.31, 1.45, 0)    # cab, below the windows
+	B.call(1.62, 1.25, 2.3, [null, paint, null, paint, null, null], 2.31, 1.45, 0)      # cab, below the windows
+	_wheel_arches(b, paint, dark)
 	B.call(0.48, 1.25, 2.3, [paint, null, paint, paint, paint, paint], 3.36, 1.45, 0)   # bonnet
 	# upper cab as panels with real openings for the windscreen and side windows (see-through from outside)
 	var UX0 := 1.5
@@ -164,26 +165,18 @@ func _build_model() -> void:
 		B.call(0.05, 0.1, 0.14, reverse_mat, -3.75, 0.8, s * 1.08)                      # reversing light
 		B.call(0.06, 0.06, 0.12, ind_mat[0 if s < 0 else 1], 2.0, 1.45, s * 1.17)       # side repeater
 		B.call(0.06, 0.3, 0.16, dark, 3.0, 2.45, s * 1.32)
-		B.call(0.4, 0.06, 0.25, dark, 2.6, 0.55, s * 1.2)
-		B.call(1.0, 0.7, 0.05, dark, -2.3, 1.0, s * 1.3)
+		B.call(0.4, 0.06, 0.25, dark, 1.75, 0.6, s * 1.2)      # cab step, behind the front wheel
+		# rear mudguard over the twin wheels, and a rubber mud flap hanging behind them
+		for k in 16:
+			var a := PI * (0.12 + 0.76 * k / 15.0)
+			B.call(0.16, 0.03, 0.7, dark, -2.3 + cos(a) * 0.62, 0.5 + sin(a) * 0.62, s * 1.08, a - PI / 2)
+		B.call(0.025, 0.55, 0.66, dark, -2.98, 0.5, s * 1.08)
 	_cab_interior(b)
 	b.commit(self)
 	_build_wipers(dark)
 
-	# wheels: steerable fronts, dual rears
-	var tyre := CylinderMesh.new()
-	tyre.top_radius = 0.5
-	tyre.bottom_radius = 0.5
-	tyre.height = 0.32
-	tyre.radial_segments = 24
-	var hubm := CylinderMesh.new()
-	hubm.top_radius = 0.26
-	hubm.bottom_radius = 0.26
-	hubm.height = 0.34
-	hubm.radial_segments = 12
-	var nut := BoxMesh.new()
-	nut.size = Vector3(0.05, 0.05, 0.36)
-	var axle := Basis(Vector3.RIGHT, PI / 2)
+	# wheels: steerable fronts, dual rears; every wheel shares one mesh, its dished face turned outwards
+	var wheel_mesh := _wheel_mesh(rubber, hub, chrome)
 	for s in [-1.0, 1.0]:
 		for w in [[2.55, s * 1.0, true], [-2.3, s * 0.92, false], [-2.3, s * 1.24, false]]:
 			var pivot := Node3D.new()
@@ -191,10 +184,11 @@ func _build_model() -> void:
 			add_child(pivot)
 			var spin := Node3D.new()
 			pivot.add_child(spin)
-			_part(spin, tyre, rubber, Transform3D(axle, Vector3.ZERO))
-			_part(spin, hubm, hub, Transform3D(axle, Vector3.ZERO))
-			for k in 5:
-				_part(spin, nut, dark, Transform3D(Basis(), Vector3(cos(k * 1.256) * 0.16, sin(k * 1.256) * 0.16, 0)))
+			var mi := MeshInstance3D.new()
+			mi.mesh = wheel_mesh
+			if s < 0.0:
+				mi.basis = Basis(Vector3.UP, PI)
+			spin.add_child(mi)
 			wheels.append({"pivot": pivot, "spin": spin, "steerable": w[2]})
 	# headlight beam (only at night while driving)
 	beam = SpotLight3D.new()
@@ -349,6 +343,159 @@ func _build_wipers(dark: Material) -> void:
 func toggle_wipers() -> void:
 	wipers_on = not wipers_on
 	game.sfx.play("click")
+
+
+## Cab sides below the windows with arched cut-outs over the front wheels, a dark liner inside each arch and a
+## black trim round its edge (the wheel turns inside the arch instead of vanishing into the body)
+func _wheel_arches(b, paint: Material, dark: Material) -> void:
+	var X0 := 1.5
+	var X1 := 3.12
+	var Y0 := 0.825
+	var Y1 := 2.075
+	var C := Vector2(2.55, 0.5)
+	var R := 0.6
+	var a0 := asin((Y0 - C.y) / R)        # where the arch meets the bottom edge of the cab
+	var arc := PackedVector2Array()
+	var arc_out := PackedVector2Array()
+	var N := 18
+	for k in N + 1:
+		var a := PI - a0 - (PI - 2.0 * a0) * k / N
+		arc.append(C + Vector2(cos(a), sin(a)) * R)
+		arc_out.append(C + Vector2(cos(a), sin(a)) * (R + 0.07))
+	var outline := PackedVector2Array([Vector2(X0, Y0)])
+	outline.append_array(arc)
+	outline.append_array(PackedVector2Array([Vector2(X1, Y0), Vector2(X1, Y1), Vector2(X0, Y1)]))
+	var liner := _std(Color("#141516"), 0.95)
+	liner.cull_mode = BaseMaterial3D.CULL_DISABLED
+	for s in [-1.0, 1.0]:
+		var z: float = s * 1.15
+		# the side panel: polygon facing +z, turned round for the -z side (mirrored outline)
+		if s > 0:
+			b.polygon(Transform3D(Basis(), Vector3(0, 0, z)), outline, paint, 1.0, true)
+		else:
+			var rev := PackedVector2Array()
+			for i in range(outline.size() - 1, -1, -1):
+				rev.append(Vector2(-outline[i].x, outline[i].y))
+			b.polygon(Transform3D(Basis(Vector3.UP, PI), Vector3(0, 0, z)), rev, paint, 1.0, true)
+		# liner: the arch surface from the side panel in to the chassis
+		for k in N:
+			var p0: Vector2 = arc[k]
+			var p1: Vector2 = arc[k + 1]
+			b.quad(Transform3D.IDENTITY, Vector3(p0.x, p0.y, z), Vector3(p1.x, p1.y, z), Vector3(p1.x, p1.y, s * 0.7), Vector3(p0.x, p0.y, s * 0.7), liner, Vector3.ZERO, 1.0, false)
+		# black trim standing a little proud of the panel
+		var f := Transform3D(Basis(), Vector3(0, 0, z + s * 0.015))
+		b.strip(f, arc_out, arc, dark, Vector3(0, 0, s))
+		for k in N:
+			var p0: Vector2 = arc_out[k]
+			var p1: Vector2 = arc_out[k + 1]
+			b.quad(Transform3D.IDENTITY, Vector3(p0.x, p0.y, z), Vector3(p1.x, p1.y, z), Vector3(p1.x, p1.y, z + s * 0.015), Vector3(p0.x, p0.y, z + s * 0.015), dark, Vector3((p0.x + p1.x) / 2 - C.x, (p0.y + p1.y) / 2 - C.y, 0), 1.0, false)
+
+
+## A lathe surface spun round the z axis from a profile of (radius, z) points; a repeated point makes a crease.
+## The profile runs so that its outside is on the right of the direction of travel (as seen with r up, z right).
+## mod(r, z, angle) -> r reshapes the surface (tread blocks).
+static func _lathe_z(st: SurfaceTool, prof: Array, segs: int, mod := Callable()) -> void:
+	var n := prof.size()
+	var base := 0
+	var groups := PackedInt32Array()   # a new smoothing group after each repeated point: a hard edge there
+	var g := 0
+	for i in n:
+		if i > 0 and prof[i] == prof[i - 1]:
+			g += 1
+		groups.append(g)
+	for j in segs:
+		var a := TAU * j / segs
+		for i in n:
+			var p: Vector2 = prof[i]
+			var r: float = mod.call(p.x, p.y, a) if mod.is_valid() else p.x
+			st.set_smooth_group(groups[i])
+			st.add_vertex(Vector3(cos(a) * r, sin(a) * r, p.y))
+	for j in segs:
+		var j2 := (j + 1) % segs
+		for i in n - 1:
+			var a := base + j * n + i
+			var b := base + j2 * n + i
+			var c := b + 1
+			var d := a + 1
+			for k in [a, d, b, b, d, c]:
+				st.add_index(k)
+
+
+## Truck wheel: a tyre with rounded shoulders, two circumferential grooves, slanted shoulder blocks and a raised
+## sidewall ring, on a deeply dished steel rim with vent holes, a raised hub, ten wheel nuts and a centre cap.
+## The outer face looks towards +z. One ArrayMesh, a surface per material.
+func _wheel_mesh(rubber: Material, rim: Material, chrome: Material) -> ArrayMesh:
+	var out := ArrayMesh.new()
+	# tyre: from the inner bead round the tread to the outer bead
+	var half := [Vector2(0.300, -0.120), Vector2(0.318, -0.140), Vector2(0.350, -0.156), Vector2(0.400, -0.164),
+		Vector2(0.420, -0.166), Vector2(0.428, -0.173), Vector2(0.438, -0.173), Vector2(0.446, -0.166),
+		Vector2(0.470, -0.158), Vector2(0.488, -0.142), Vector2(0.497, -0.122),
+		Vector2(0.500, -0.105), Vector2(0.500, -0.064), Vector2(0.486, -0.060), Vector2(0.486, -0.036), Vector2(0.500, -0.032)]
+	var prof := half.duplicate()
+	for i in range(half.size() - 1, -1, -1):
+		prof.append(Vector2(half[i].x, -half[i].y))
+	var tread := func(r: float, z: float, a: float) -> float:
+		if r < 0.495 or absf(z) < 0.062:
+			return r
+		var u := a * 34.0 / TAU + (absf(z) - 0.06) * 6.0 * signf(z)   # slanted blocks, a chevron across the tread
+		return r - 0.016 if fposmod(u, 1.0) < 0.3 else r
+	var st := SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_lathe_z(st, prof, 170, tread)
+	st.generate_normals()
+	st.set_material(rubber)
+	st.commit(out)
+	# steel rim: the back plate, the barrel hidden in the tyre, the flange, the dish, the hub and the centre cap
+	var rp := [Vector2(0.0, -0.105), Vector2(0.27, -0.105), Vector2(0.27, -0.105), Vector2(0.30, -0.128),
+		Vector2(0.312, -0.13), Vector2(0.312, 0.118), Vector2(0.312, 0.118), Vector2(0.320, 0.128), Vector2(0.306, 0.137),
+		Vector2(0.292, 0.128), Vector2(0.286, 0.10), Vector2(0.283, 0.072), Vector2(0.283, 0.072), Vector2(0.256, 0.056),
+		Vector2(0.21, 0.050), Vector2(0.182, 0.054), Vector2(0.168, 0.072), Vector2(0.168, 0.072), Vector2(0.125, 0.080),
+		Vector2(0.098, 0.084), Vector2(0.098, 0.084), Vector2(0.092, 0.104), Vector2(0.070, 0.118), Vector2(0.070, 0.118),
+		Vector2(0.066, 0.126), Vector2(0.040, 0.132), Vector2(0.0, 0.134)]
+	st = SurfaceTool.new()
+	st.begin(Mesh.PRIMITIVE_TRIANGLES)
+	_lathe_z(st, rp, 48)
+	st.generate_normals()
+	st.set_material(rim)
+	st.commit(out)
+	# vent holes in the dish (dark ovals) and the wheel nuts round the hub
+	var holes := SurfaceTool.new()
+	holes.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var hole := CylinderMesh.new()
+	hole.top_radius = 0.034
+	hole.bottom_radius = 0.034
+	hole.height = 0.004
+	hole.radial_segments = 14
+	hole.rings = 1
+	var axle := Basis(Vector3.RIGHT, PI / 2)
+	for k in 8:
+		var a := TAU * (k + 0.5) / 8
+		var hb := Basis(Vector3.BACK, a) * axle * Basis.from_scale(Vector3(1.0, 1.0, 1.45))
+		holes.append_from(hole, 0, Transform3D(hb, Vector3(cos(a) * 0.226, sin(a) * 0.226, 0.054)))
+	holes.set_material(_std(Color("#0b0b0c"), 0.95))
+	holes.commit(out)
+	var nuts := SurfaceTool.new()
+	nuts.begin(Mesh.PRIMITIVE_TRIANGLES)
+	var nut := CylinderMesh.new()
+	nut.top_radius = 0.017
+	nut.bottom_radius = 0.019
+	nut.height = 0.042
+	nut.radial_segments = 6
+	nut.rings = 1
+	var stud := CylinderMesh.new()
+	stud.top_radius = 0.008
+	stud.bottom_radius = 0.008
+	stud.height = 0.02
+	stud.radial_segments = 8
+	stud.rings = 1
+	for k in 10:
+		var a := TAU * k / 10
+		var p := Vector3(cos(a) * 0.132, sin(a) * 0.132, 0.096)
+		nuts.append_from(nut, 0, Transform3D(Basis(Vector3.BACK, a) * axle, p))
+		nuts.append_from(stud, 0, Transform3D(axle, p + Vector3(0, 0, 0.026)))
+	nuts.set_material(chrome)
+	nuts.commit(out)
+	return out
 
 
 func _part(parent: Node3D, mesh: Mesh, mat: Material, xf: Transform3D) -> void:

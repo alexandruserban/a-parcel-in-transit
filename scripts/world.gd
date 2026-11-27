@@ -54,6 +54,8 @@ var tree_detail := 1.0       # leaf clusters in the big trees (GFX.treeDetail: 0
 var water_mats: Array[ShaderMaterial] = []
 var night_glows: Array = []
 var night_lights: Array = []
+var house_roofs: Array = []           # {inv, foot, roof}: for things flying over the town (roof_top_at)
+var vine_leaf_mat: ShaderMaterial          # the grapevines on the city wall sway with the wind too
 var outer_zones: Array = []           # Rect2s outside the wall the player may walk on (gate passage, bridge, bridgehead)
 var moat          # Light3Ds shown only at night (castle, church, park)           # [{mat, energy}] emissive materials that light up at night
 var mats := {}
@@ -147,6 +149,10 @@ func _make_materials() -> void:
 	mats.palestone = tmat("ashlar_d6c29b", Vector2(3, 3), {"rough": 0.88, "depth": 0.6})
 	mats.redstone = tmat("ashlar_a8634f", Vector2(3, 3), {"rough": 0.9, "depth": 0.7})
 	mats.wallstone = tmat("ashlar_a89a84", Vector2(3, 3), {"rough": 0.93, "depth": 0.8})
+	mats.oldwall = tmat("ashlar_a89a84", Vector2(3, 3), {"rough": 0.97, "depth": 1.4, "age": 1.0})
+	mats.putlog = _std(Color("#2e2a25"), 1.0)
+	mats.repair_brick = tmat("brick_7a4a36", Vector2(1.6, 1.6), {"rough": 0.95, "age": 0.6})
+	mats.repair_stone = tmat("ashlar_c9b08a", Vector2(2.4, 2.4), {"rough": 0.95, "depth": 1.0, "age": 0.7})
 	mats.slate = tmat("slate", Vector2(1.2, 1.0), {"rough": 0.6, "metal": 0.05, "two_sided": true, "depth": 0.8})
 	mats.clay = roof_mat("#a0492f")
 	mats.copper = tmat("copper", Vector2(2, 2), {"rough": 0.55, "metal": 0.35})
@@ -224,6 +230,7 @@ func tmat(name: String, tile: Vector2, o := {}) -> ShaderMaterial:
 	m.set_shader_parameter("metallic", o.get("metal", 0.0))
 	m.set_shader_parameter("tint", o.get("tint", Color.WHITE))
 	m.set_shader_parameter("emission_tint", o.get("emission_tint", Color.WHITE))
+	m.set_shader_parameter("age", o.get("age", 0.0))
 	if o.has("macro"):
 		m.set_shader_parameter("macro_mode", o.macro)
 		m.set_shader_parameter("macro_tex", tex("ground_macro"))
@@ -438,6 +445,21 @@ func in_warehouse(x: float, z: float, m := 0.0) -> bool:
 	return x > WH.x0 + 0.2 - m and x < WH.x1 - 0.2 + m and z > WH.z0 + 0.2 - m and z < WH.z1 - 0.2 + m
 
 
+## Height of the highest roof (or garage, chimney) at (x, z), 0 where there is no house
+func roof_top_at(x: float, z: float) -> float:
+	var top := 0.0
+	for h in house_roofs:
+		if not in_rect(h.foot, x, z, 0.8):
+			continue
+		var lp: Vector3 = h.inv * Vector3(x, 0, z)
+		top = maxf(top, 4.6)   # garage, workshop, porch
+		if absf(lp.x) < HOUSE_W / 2 + 1.0 and absf(lp.z) < HOUSE_D / 2 + 1.0 and h.has("roof"):
+			top = maxf(top, Houses.roof_y(h.roof, clampf(lp.x, -HOUSE_W / 2, HOUSE_W / 2), clampf(lp.z, -HOUSE_D / 2, HOUSE_D / 2)) + 0.4)
+			if Vector2(lp.x - HOUSE_W * 0.3, lp.z - HOUSE_D * 0.2).length() < 1.5:
+				top = maxf(top, Houses.roof_y(h.roof, HOUSE_W * 0.3, HOUSE_D * 0.2) + 1.6)   # chimney
+	return top
+
+
 func house_at(x: float, z: float) -> bool:
 	return any_rect(house_rects, x, z)
 
@@ -484,6 +506,8 @@ func random_spot(range_m: float) -> Vector2:
 func set_wind(strength: float, dir: Vector2) -> void:
 	var mats_: Array = trees.leaf_mats.values()
 	mats_.append(trees.bark_mat)
+	if vine_leaf_mat != null:
+		mats_.append(vine_leaf_mat)
 	for m in mats_:
 		m.set_shader_parameter("wind", strength)
 		m.set_shader_parameter("wind_dir", dir)
@@ -795,9 +819,12 @@ func _house(idx: int, x: float, z: float, rot: float, cfg: Dictionary) -> void:
 	tree_block.append(local_rect(xf, -11.5, D / 2 + 5, 6.5, 16))
 	tree_block.append(local_rect(xf, 0, 12.0, 16, 10))
 	house_rects.append(local_rect(xf, 0, 0, W, D))
+	var house_rec := {"inv": xf.affine_inverse(), "foot": local_rect(xf, -3.5, 1.6, 23.5, 17.8)}
+	house_roofs.append(house_rec)
 
 	# Hollow two-storey shell with furnished rooms, stairs, front door, garage, roof and facade (houses.gd)
 	var roof: Dictionary = house_parts.build(idx, xf, st, cfg, wall)
+	house_rec.roof = roof
 	var front := face_xf(xf, 0)
 
 	# Chimney through the roof
@@ -869,7 +896,8 @@ func _church() -> void:
 			b.box(I, c, Vector3(1.0, 3.2, 1.0) * (Vector3.ONE - n.abs()) + n.abs() * 0.05, mats.belfry_glow, 1.0, false)
 		var cc := Vector3(CX, 23.5, 30.5) + n * 4.55
 		var cxf := Transform3D(Basis.looking_at(-n, Vector3.UP), cc)
-		b.cylinder(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3.ZERO), Vector3.ZERO, 1.5, 1.5, 0.06, 20, mats.clock_glow, true, 1.0, false)
+		_clock_frame(cxf, 1.5)
+		b.cylinder(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3.ZERO), Vector3.ZERO, 1.5, 1.5, 0.06, 32, mats.clock_glow, true, 1.0, false)
 		b.box(cxf, Vector3(0, 0.45, 0.08), Vector3(0.1, 1.0, 0.03), mats.iron, 1.0, false)
 		b.box(cxf, Vector3(0.3, 0, 0.09), Vector3(0.7, 0.08, 0.03), mats.iron, 1.0, false)
 	# Copper spire with a gilded cross
@@ -977,9 +1005,9 @@ func _church_portal(cx: float, tz: float) -> void:
 
 ## A pointed stained-glass window in a stone frame on facade frame F (oldtown.js churchWindow); the big one
 ## gets a mullion and a ring of tracery in its head
-func _church_window(F: Transform3D, u: float, y: float, w: float, h: float, fw: float, fd: float, glass: Material, mullion: bool) -> void:
+func _church_window(F: Transform3D, u: float, y: float, w: float, h: float, fw: float, fd: float, glass: Material, mullion: bool, frame: Material = null) -> void:
 	var f := F * Transform3D(Basis(), Vector3(u, y, 0))
-	var pale: Material = mats.palestone
+	var pale: Material = frame if frame != null else mats.palestone
 	var ow := w + 2 * fw
 	var outer := Castle.arch_pts(ow, h + fw * 1.4 - ow * 0.866, ow * 0.866, -fw * 0.5, 12)
 	var inner := Castle.arch_pts(w, h - w * 0.866, w * 0.866, 0.0, 12)
@@ -1118,6 +1146,7 @@ func _squares() -> void:
 			"linden":
 				_tree(cx, cz, "linden", 1.45)
 				b.cylinder(I, Vector3(cx, 0, cz), 2.0, 2.0, 0.45, 16, color_mat("#6b5040"), true)
+				solid_cyl(cx, cz, 2.0, 0.45)
 			"maypole":
 				b.cylinder(I, Vector3(cx, 0, cz), 0.18, 0.12, 18, 8, mats.white)
 				for k in 4:
@@ -1291,7 +1320,10 @@ func set_water_sky(p: Dictionary, sun_dir: Vector3, moon_dir: Vector3, moon_vis:
 # ----------------------------------------------------------------------------------------------
 func _city_wall() -> void:
 	var I := Transform3D.IDENTITY
-	var st: Material = mats.wallstone
+	var st: Material = mats.oldwall
+	var wr := RandomNumberGenerator.new()   # its own dice, so the rest of the town stays as it was
+	wr.seed = 1475
+	var vine_faces: Array = []
 	var T := 2.4
 	var HT := 8.0
 	var F := FENCE
@@ -1310,17 +1342,62 @@ func _city_wall() -> void:
 		var ax: bool = r[2]
 		var size := Vector3(L, HT, T) if ax else Vector3(T, HT, L)
 		bx(I, c.x, HT / 2, c.z, size.x, size.y, size.z, st, true, true, 1.0)
-		# merlons on the outer edge, walkway parapet inside
+		# merlons on the outer edge, walkway parapet inside; centuries have worn the merlons uneven, cracked a
+		# few and brought some down
 		var out_dir := Vector3(0, 0, signf(c.z)) if ax else Vector3(signf(c.x), 0, 0)
 		var along := Vector3.RIGHT if ax else Vector3.BACK
 		var n := int(L / 2.2)
 		for k in n:
-			var p := c + along * (-L / 2 + 1.1 + k * 2.2) + out_dir * (T / 2 - 0.3)
-			var ms := Vector3(1.2, 1.3, 0.6) if ax else Vector3(0.6, 1.3, 1.2)
-			b.box(I, Vector3(p.x, HT + 0.65, p.z), ms, st, 1.0, true)
+			var roll := wr.randf()
+			if roll < 0.06:
+				continue   # fallen
+			var mh := 1.3 * wr.randf_range(0.82, 1.05)
+			var tilt := wr.randf_range(-0.03, 0.03)
+			if roll < 0.16:   # broken off: a stump with a slanted top
+				mh = wr.randf_range(0.45, 0.8)
+				tilt = wr.randf_range(-0.12, 0.12)
+			var p := c + along * (-L / 2 + 1.1 + k * 2.2 + wr.randf_range(-0.08, 0.08)) + out_dir * (T / 2 - 0.3)
+			var ms := Vector3(wr.randf_range(1.05, 1.25), mh, 0.6) if ax else Vector3(0.6, mh, wr.randf_range(1.05, 1.25))
+			var mb := Basis(out_dir, tilt) * Basis(Vector3.UP, wr.randf_range(-0.025, 0.025))
+			b.box(Transform3D(mb, Vector3(p.x, HT + mh / 2, p.z)), Vector3.ZERO, ms, st, 1.0, true)
 		var ps := Vector3(L, 0.6, 0.4) if ax else Vector3(0.4, 0.6, L)
 		var pc := c - out_dir * (T / 2 - 0.2)
 		b.box(I, Vector3(pc.x, HT + 0.3, pc.z), ps, st, 1.0, true)
+		# both faces: patches of later repairs, rows of putlog holes, and stones fallen at the foot
+		for side in [1.0, -1.0]:
+			var fn: Vector3 = out_dir * side
+			var face := c + fn * (T / 2)
+			var ext := L / 2 - 6.0
+			var u := -ext + wr.randf_range(0, 25)
+			while u < ext:
+				var pw := wr.randf_range(1.4, 3.6)
+				var ph := wr.randf_range(0.9, 2.6)
+				var py := wr.randf_range(0.6, HT - ph / 2 - 0.4)
+				var pm: Material = mats.repair_brick if wr.randf() < 0.55 else mats.repair_stone
+				var pp := face + along * u + fn * 0.012
+				var pa := along * pw / 2
+				var pv := Vector3(0, ph / 2, 0)
+				b.quad(I, pp - pa - pv + Vector3(0, py, 0), pp + pa - pv + Vector3(0, py, 0), pp + pa + pv + Vector3(0, py, 0), pp - pa + pv + Vector3(0, py, 0), pm, fn, 1.0, false)
+				u += wr.randf_range(18, 42)
+			for row in [2.3, 4.5, 6.6]:
+				u = -ext + wr.randf_range(0, 1.5)
+				while u < ext:
+					if wr.randf() < 0.6:   # many have been filled in over the years
+						var hp := face + along * u + fn * 0.01 + Vector3(0, row + wr.randf_range(-0.06, 0.06), 0)
+						var ha := along * wr.randf_range(0.08, 0.11)
+						var hv := Vector3(0, wr.randf_range(0.08, 0.11), 0)
+						b.quad(I, hp - ha - hv, hp + ha - hv, hp + ha + hv, hp - ha + hv, mats.putlog, fn, 1.0, false)
+					u += wr.randf_range(2.6, 3.2)
+			u = -ext + wr.randf_range(0, 10)
+			while side < 0.0 and u < ext:   # rubble only on the town side (the moat is outside)
+				for j in wr.randi_range(1, 4):
+					var sz := wr.randf_range(0.18, 0.45)
+					var rp := face + along * (u + wr.randf_range(-0.8, 0.8)) + fn * wr.randf_range(0.2, 0.9)
+					var rb := Basis(Vector3.UP, wr.randf() * TAU) * Basis(Vector3.RIGHT, wr.randf_range(-0.3, 0.3))
+					b.box(Transform3D(rb, Vector3(rp.x, sz * 0.35, rp.z)), Vector3.ZERO, Vector3(sz, sz * 0.7, sz * 0.85), st, 1.0, false)
+				u += wr.randf_range(6, 16)
+		# the town side gets grapevines (vines.gd)
+		vine_faces.append({"a": c - along * (L / 2) - out_dir * (T / 2), "dir": along, "n": -out_dir, "len": L})
 	# Round towers: corners and along each side
 	var towers: Array = []
 	for sx in [-1, 1]:
@@ -1335,11 +1412,13 @@ func _city_wall() -> void:
 		towers.append([p, F + 1.2, 3.8, 12.5])
 		towers.append([-(F + 1.2), p, 3.8, 12.5])
 		towers.append([F + 1.2, p, 3.8, 12.5])
+	var avoid: Array = [Vector3(0, -F, 9.5)]   # the Nordtor
 	for tw in towers:
 		var x: float = tw[0]
 		var z: float = tw[1]
 		var r: float = tw[2]
 		var h: float = tw[3]
+		avoid.append(Vector3(x, z, r + 2.5))
 		b.cylinder(I, Vector3(x, 0, z), r * 1.05, r, h, 20, st, false, 1.0)
 		b.cylinder(I, Vector3(x, h, z), r + 0.6, 0.0, r * 1.9, 20, mats.clay, false, 1.0)
 		solid_cyl(x, z, r, h)
@@ -1355,11 +1434,11 @@ func _city_wall() -> void:
 	var stn: Material = mats.palestone
 	for s in [-1, 1]:
 		bx(I, s * 4.5, GH / 2, gzc, 4.0, GH, gd, stn, true)
-	bx(I, 0, (GH + 7.5) / 2, gzc, 5.0, GH - 7.5, gd, stn)
+	b.box(I, Vector3(0, (GH + 7.5) / 2, gzc), Vector3(5.0, GH - 7.5, gd), stn, 1.0, true, true)   # closed underneath
 	for zf in [gz0 - 0.02, gz1 + 0.02]:
 		var o := Vector3(0, 0, -1) if zf < gzc else Vector3(0, 0, 1)
 		b.tri(I, Vector3(-2.5, 6.2, zf), Vector3(2.5, 6.2, zf), Vector3(0, 7.5, zf), mats.recess, o)
-	bx(I, 0, 6.85, gzc, 5.0, 1.3, gd - 0.1, mats.recess, false, false)
+	b.box(I, Vector3(0, 6.85, gzc), Vector3(5.0, 1.3, gd - 0.1), mats.recess, 1.0, false, true)   # the passage vault
 	bx(I, 0, 0.03, gzc, 5.0, 0.04, gd, mats.cobble, false, false)
 	# the gate passage is open: it leads out onto the drawbridge (moat.gd)
 	# spire and corner turrets
@@ -1374,12 +1453,91 @@ func _city_wall() -> void:
 	for sx in [-1, 1]:
 		for zc in [gz0, gz1]:
 			b.cylinder(I, Vector3(sx * 6.5, GH - 4, zc), 1.0, 1.0, 6.5, 12, stn, false)
+			b.cylinder(I, Vector3(sx * 6.5, GH - 5.4, zc), 0.12, 1.0, 1.4, 12, stn, false)   # corbel closing the turret below
 			b.cylinder(I, Vector3(sx * 6.5, GH + 2.5, zc), 1.25, 0.0, 3.2, 12, mats.slate)
+	_nordtor_windows(gz0, gz1, GH)
+	# grapevines on the town side of the wall
+	var vines := preload("res://scripts/vines.gd").new()
+	vines.build(self, vine_faces, avoid, self)
+	vine_leaf_mat = vines.leaf_mat
 	# clock on the town side
 	var cxf := Transform3D(Basis(), Vector3(0, 17, gz1 + 0.05))
-	b.cylinder(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3.ZERO), Vector3.ZERO, 1.6, 1.6, 0.06, 20, mats.white, true, 1.0, false)
+	_clock_frame(cxf, 1.6)
+	b.cylinder(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3.ZERO), Vector3.ZERO, 1.6, 1.6, 0.06, 32, mats.white, true, 1.0, false)
 	b.box(cxf, Vector3(0, 0.45, 0.08), Vector3(0.1, 1.0, 0.03), mats.iron, 1.0, false)
 	b.box(cxf, Vector3(-0.3, 0, 0.09), Vector3(0.7, 0.08, 0.03), mats.iron, 1.0, false)
+
+
+## Frame round a clock dial of radius r (cxf: the dial's centre on the wall, +z out of it): a square sandstone
+## panel with gilt rosettes in the corners and a cornice over it, a round moulded surround, a gilt bezel,
+## twelve hour marks (gilt at the quarters) and a gilt boss where the hands turn
+func _clock_frame(cxf: Transform3D, r: float) -> void:
+	var stone: Material = mats.sandstone
+	var hp := r + 0.45
+	b.box(cxf, Vector3(0, 0, -0.015), Vector3(hp * 2, hp * 2, 0.09), stone, 3.0, false)
+	b.box(cxf, Vector3(0, hp + 0.09, 0.05), Vector3(hp * 2 + 0.4, 0.18, 0.22), stone, 3.0, false)
+	b.box(cxf, Vector3(0, -hp - 0.07, 0.04), Vector3(hp * 2 + 0.2, 0.14, 0.18), stone, 3.0, false)
+	for sx in [-1.0, 1.0]:
+		for sy in [-1.0, 1.0]:
+			b.cylinder(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3(sx * (hp - 0.2), sy * (hp - 0.2), 0.03)), Vector3.ZERO, 0.11, 0.08, 0.05, 12, mats.gilt, true, 1.0, false)
+	var ring := TorusMesh.new()
+	ring.inner_radius = r + 0.02
+	ring.outer_radius = r + 0.34
+	ring.rings = 40
+	ring.ring_segments = 8
+	b.mesh(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2) * Basis.from_scale(Vector3(1, 0.55, 1)), Vector3(0, 0, 0.05)), ring, stone, false)
+	var bezel := TorusMesh.new()
+	bezel.inner_radius = r - 0.05
+	bezel.outer_radius = r + 0.03
+	bezel.rings = 40
+	bezel.ring_segments = 6
+	b.mesh(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3(0, 0, 0.07)), bezel, mats.gilt, false)
+	for k in 12:
+		var a := TAU * k / 12
+		var quarter := k % 3 == 0
+		var mb := Basis(Vector3.BACK, -a)
+		b.box(cxf * Transform3D(mb, Vector3.ZERO), Vector3(0, r * 0.82, 0.075), Vector3(0.11 if quarter else 0.06, 0.3 if quarter else 0.2, 0.02), mats.gilt if quarter else mats.iron, 1.0, false)
+	b.cylinder(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3(0, 0, 0.06)), Vector3.ZERO, 0.1, 0.08, 0.06, 12, mats.gilt, true, 1.0, false)
+
+
+## Windows in the Nordtor, the clock tower over the gate: tall pointed windows over the archway and on the sides,
+## paired lights high up under the turrets, and arrow slits low in the piers. Leaded glass, lit at night, in
+## darker sandstone frames with a sill.
+func _nordtor_windows(gz0: float, gz1: float, GH: float) -> void:
+	var frame: Material = mats.sandstone
+	var gzc := (gz0 + gz1) / 2
+	var faces := [   # [frame on the face (+z out of it), half width of the face, town side?]
+		[Transform3D(Basis(), Vector3(0, 0, gz1)), 6.5, true],
+		[Transform3D(Basis(Vector3.UP, PI), Vector3(0, 0, gz0)), 6.5, false],
+		[Transform3D(Basis(Vector3.UP, PI / 2), Vector3(6.5, 0, gzc)), (gz1 - gz0) / 2, false],
+		[Transform3D(Basis(Vector3.UP, -PI / 2), Vector3(-6.5, 0, gzc)), (gz1 - gz0) / 2, false],
+	]
+	var sill := func(F: Transform3D, u: float, y: float, ww: float) -> void:
+		b.box(F, Vector3(u, y - 0.09, 0.12), Vector3(ww + 0.5, 0.14, 0.26), frame, 3.0, false)
+	for fc in faces:
+		var F: Transform3D = fc[0]
+		var hw: float = fc[1]
+		var town: bool = fc[2]
+		var front := hw > 5.0
+		# main window over the archway (or in the middle of the side)
+		_church_window(F, 0, 9.4, 1.7 if front else 1.4, 3.6, 0.26, 0.14, mats.leaded, front, frame)
+		sill.call(F, 0, 9.4, 1.7 if front else 1.4)
+		# a second one higher up, except where the clock face hangs
+		if not town:
+			_church_window(F, 0, 14.6, 1.5 if front else 1.2, 3.1, 0.24, 0.13, mats.leaded, false, frame)
+			sill.call(F, 0, 14.6, 1.5 if front else 1.2)
+		# paired lights high up, under the corner turrets
+		var pu := 3.0 if front else 1.6
+		for s in [-1.0, 1.0]:
+			_church_window(F, s * pu * 0.5 if not front else s * pu, 19.2, 0.95, 2.3, 0.18, 0.11, mats.leaded, false, frame)
+		sill.call(F, 0 if not front else -pu, 19.2, 0.95 if front else pu + 0.95)
+		if front:
+			sill.call(F, pu, 19.2, 0.95)
+		# arrow slits low in the piers (the gate passage runs between them on the front faces)
+		for u in ([-4.5, 4.5] if front else [-2.0, 2.0]):
+			b.box(F, Vector3(u, 3.6, 0.06), Vector3(0.62, 1.9, 0.12), frame, 3.0, false)
+			b.box(F, Vector3(u, 3.6, 0.125), Vector3(0.16, 1.4, 0.02), mats.recess, 1.0, false)
+			b.box(F, Vector3(u, 3.6, 0.125), Vector3(0.44, 0.12, 0.02), mats.recess, 1.0, false)
 
 
 # ----------------------------------------------------------------------------------------------
