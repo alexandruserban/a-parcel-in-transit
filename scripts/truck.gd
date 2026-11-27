@@ -118,7 +118,13 @@ func _build_model() -> void:
 	# (faces that would cut through the cab interior are left out: _cab_interior lines it from inside)
 	B.call(1.62, 1.25, 2.3, [null, paint, null, paint, null, null], 2.31, 1.45, 0)      # cab, below the windows
 	_wheel_arches(b, paint, dark)
-	B.call(0.48, 1.25, 2.3, [paint, null, paint, paint, paint, paint], 3.36, 1.45, 0)   # bonnet
+	# bonnet, its front corners rounded (radius RB)
+	var RB := 0.18
+	var BX := 3.6 - RB
+	B.call(BX - 3.12, 1.25, 2.3, [null, null, paint, paint, paint, paint], (3.12 + BX) / 2, 1.45, 0)
+	B.call(RB, 1.25, 2.3 - 2 * RB, [paint, null, paint, paint, null, null], BX + RB / 2, 1.45, 0)
+	for s in [-1.0, 1.0]:
+		b.cylinder(I, Vector3(BX, 0.825, s * (1.15 - RB)), RB, RB, 1.25, 8, paint, true, 1.0, true, 0.0 if s > 0 else -PI / 2, PI / 2)
 	# upper cab as panels with real openings for the windscreen and side windows (see-through from outside)
 	var UX0 := 1.5
 	var UX1 := 3.2
@@ -127,26 +133,47 @@ func _build_model() -> void:
 	var UZ := 1.15
 	var pq := func(a: Vector3, c: Vector3, d: Vector3, e: Vector3, n: Vector3) -> void:
 		b.quad(I, a, c, d, e, paint, n, 1.0, true)
-	pq.call(Vector3(UX0, UY1, -UZ), Vector3(UX1, UY1, -UZ), Vector3(UX1, UY1, UZ), Vector3(UX0, UY1, UZ), Vector3.UP)
+	# roof with the front corners rounded to match (radius RU), as a flat outline seen from above
+	var RU := 0.15
+	var roof := PackedVector2Array([Vector2(UX0, UZ), Vector2(UX0, -UZ)])
+	for k2 in 7:
+		var a := -PI / 2 + PI / 2 * k2 / 6.0
+		roof.append(Vector2(UX1 - RU + cos(a) * RU, -(UZ - RU) + sin(a) * RU))
+	for k2 in 7:
+		var a := PI / 2 * k2 / 6.0
+		roof.append(Vector2(UX1 - RU + cos(a) * RU, (UZ - RU) + sin(a) * RU))
+	var flip := PackedVector2Array()
+	for q in roof:
+		flip.append(Vector2(q.x, -q.y))   # the outline's y runs along -z once laid flat
+	b.polygon(Transform3D(Basis(Vector3.RIGHT, -PI / 2), Vector3(0, UY1, 0)), flip, paint, 1.0, true)
 	var front_panel := func(z0: float, z1: float, y0: float, y1: float) -> void:
 		pq.call(Vector3(UX1, y0, z0), Vector3(UX1, y0, z1), Vector3(UX1, y1, z1), Vector3(UX1, y1, z0), Vector3.RIGHT)
-	front_panel.call(-UZ, UZ, UY0, 2.1)
-	front_panel.call(-UZ, UZ, 2.9, UY1)
-	front_panel.call(-UZ, -0.98, 2.1, 2.9)
-	front_panel.call(0.98, UZ, 2.1, 2.9)
+	front_panel.call(-UZ + RU, UZ - RU, UY0, 2.1)
+	front_panel.call(-UZ + RU, UZ - RU, 2.9, UY1)
+	front_panel.call(-UZ + RU, -0.98, 2.1, 2.9)
+	front_panel.call(0.98, UZ - RU, 2.1, 2.9)
+	for s in [-1.0, 1.0]:
+		b.cylinder(I, Vector3(UX1 - RU, UY0, s * (UZ - RU)), RU, RU, UY1 - UY0, 8, paint, false, 1.0, true, 0.0 if s > 0 else -PI / 2, PI / 2)
 	for s in [-1.0, 1.0]:
 		var z: float = s * UZ
 		var n := Vector3(0, 0, s)
 		var side_panel := func(x0: float, x1: float, y0: float, y1: float) -> void:
 			pq.call(Vector3(x0, y0, z), Vector3(x1, y0, z), Vector3(x1, y1, z), Vector3(x0, y1, z), n)
-		side_panel.call(UX0, UX1, UY0, 2.18)
-		side_panel.call(UX0, UX1, 2.82, UY1)
+		side_panel.call(UX0, UX1 - RU, UY0, 2.18)
+		side_panel.call(UX0, UX1 - RU, 2.82, UY1)
 		side_panel.call(UX0, 1.98, 2.18, 2.82)
-		side_panel.call(2.92, UX1, 2.18, 2.82)
-	B.call(1.3, 0.5, 2.2, paint, 2.0, 3.1, 0, -0.25)
-	for k in 3:   # amber marker lights along the top of the cab
-		B.call(0.06, 0.06, 0.16, marker_mat, 2.62, 3.24, (k - 1) * 0.45, -0.25)
-	B.call(2.12, 0.16, 2.32, [orange, orange, null, null, orange, orange], 2.55, 1.6, 0)
+		side_panel.call(2.92, UX1 - RU, 2.18, 2.82)
+	# roof fairing: a wedge sitting on the cab roof, rising to the top of the cargo box (it used to be a tilted box
+	# whose lower corner dipped through the cab ceiling, a dark dent seen through the side windows)
+	var fair := PackedVector2Array([Vector2(3.0, UY1), Vector2(2.5, 3.24), Vector2(1.9, 3.37), Vector2(1.42, 3.4), Vector2(1.42, UY1)])
+	b.prism(Transform3D(Basis(), Vector3(0, 0, -1.1)), fair, 2.2, paint, 1.0, true)
+	for k in 3:   # amber marker lights along the front of the fairing
+		B.call(0.06, 0.06, 0.16, marker_mat, 2.66, 3.2, (k - 1) * 0.45, -0.41)
+	# orange stripe round the cab, following the rounded corners
+	B.call(BX - 1.49, 0.16, 2.32, [null, orange, null, null, orange, orange], (1.49 + BX) / 2, 1.6, 0)
+	B.call(RB + 0.01, 0.16, 2.3 - 2 * RB, [orange, null, null, null, null, null], BX + (RB + 0.01) / 2, 1.6, 0)
+	for s in [-1.0, 1.0]:
+		b.cylinder(I, Vector3(BX, 1.52, s * (1.15 - RB)), RB + 0.01, RB + 0.01, 0.16, 8, orange, false, 1.0, true, 0.0 if s > 0 else -PI / 2, PI / 2)
 	B.call(5.22, 0.16, 2.48, orange, -1.1, 1.15, 0)
 	B.call(0.05, 0.85, 2.05, glass, 3.25, 2.5, 0, 0.18)
 	for s in [-1.0, 1.0]:
@@ -159,7 +186,8 @@ func _build_model() -> void:
 		var lamp_axis := Basis(Vector3.BACK, -PI / 2)   # cylinders facing forward (+x)
 		b.cylinder(Transform3D(lamp_axis, Vector3(3.6, 1.35, s * 0.82)), Vector3.ZERO, 0.17, 0.17, 0.05, 20, chrome)
 		b.cylinder(Transform3D(lamp_axis, Vector3(3.63, 1.35, s * 0.82)), Vector3.ZERO, 0.14, 0.14, 0.03, 20, head_mat)
-		B.call(0.05, 0.12, 0.16, ind_mat[0 if s < 0 else 1], 3.62, 1.35, s * 1.06)      # front indicator
+		# front indicator, on the rounded corner
+		b.box(Transform3D(Basis(Vector3.UP, -s * PI / 4), Vector3(BX + RB * 0.72, 1.35, s * (1.15 - RB + RB * 0.72))), Vector3.ZERO, Vector3(0.05, 0.12, 0.16), ind_mat[0 if s < 0 else 1], 1.0, true)
 		B.call(0.05, 0.3, 0.14, tail_mat, -3.75, 1.0, s * 1.08)
 		B.call(0.05, 0.12, 0.14, ind_mat[0 if s < 0 else 1], -3.75, 1.24, s * 1.08)     # rear indicator
 		B.call(0.05, 0.1, 0.14, reverse_mat, -3.75, 0.8, s * 1.08)                      # reversing light

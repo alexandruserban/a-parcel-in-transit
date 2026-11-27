@@ -47,6 +47,7 @@ func _draw() -> void:
 		var m: Vector2 = to_map.call(p.x, p.z)
 		if m.x >= 0 and m.y >= 0 and m.x <= sz.x and m.y <= sz.y:
 			draw_circle(m, 1.6, Color("#f59e0b"))
+	_depot_marker(W, to_map, sz)
 	# Player arrow and view cone
 	var yaw: float = game.player.yaw
 	draw_set_transform(c, -yaw, Vector2.ONE)
@@ -58,3 +59,34 @@ func _draw() -> void:
 	draw_colored_polygon(PackedVector2Array([Vector2(0, -7), Vector2(5, 5), Vector2(-5, 5)]), Color("#3b82f6"))
 	draw_set_transform(Vector2.ZERO, 0.0, Vector2.ONE)
 	draw_string(get_theme_default_font(), Vector2(sz.x / 2 - 4, 14), "N", HORIZONTAL_ALIGNMENT_LEFT, -1, 12, Color("#ef4444"))
+
+
+## The Parcel Depot: a gold badge at its door; when it is off the map, the badge waits at the edge with an arrow
+## pointing the way
+func _depot_marker(W: Node, to_map: Callable, sz: Vector2) -> void:
+	var door: Vector2 = to_map.call(W.WH.x1, 0.0)
+	var c := sz / 2
+	var margin := 14.0
+	var inside := door.x >= margin and door.y >= margin and door.x <= sz.x - margin and door.y <= sz.y - margin
+	var p := door
+	if not inside:   # slide along the line from the centre until it touches the edge band
+		var d := door - c
+		var k := minf((c.x - margin) / maxf(absf(d.x), 0.001), (c.y - margin) / maxf(absf(d.y), 0.001))
+		p = c + d * k
+		var dir := d.normalized()
+		var side := Vector2(-dir.y, dir.x)
+		var tip := p + dir * 11.0
+		draw_colored_polygon(PackedVector2Array([tip, p + dir * 3.0 + side * 5.0, p + dir * 3.0 - side * 5.0]), Color("#fbbf24"))
+	var gold := Color("#fbbf24")
+	draw_rect(Rect2(p - Vector2(6, 6), Vector2(12, 12)), Color("#1e293b"))
+	draw_rect(Rect2(p - Vector2(6, 6), Vector2(12, 12)), gold, false, 2.0)
+	draw_rect(Rect2(p - Vector2(3, 3), Vector2(6, 6)), gold)   # a parcel
+	var font := get_theme_default_font()
+	var label := "DEPOT"
+	var tw := font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10).x
+	var lp := p + Vector2(-tw / 2, 18)
+	if lp.y > sz.y - 2:
+		lp.y = p.y - 10
+	lp.x = clampf(lp.x, 2.0, sz.x - tw - 2.0)
+	draw_string(font, lp + Vector2(1, 1), label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, Color(0, 0, 0, 0.7))
+	draw_string(font, lp, label, HORIZONTAL_ALIGNMENT_LEFT, -1, 10, gold)

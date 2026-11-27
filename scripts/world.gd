@@ -900,10 +900,7 @@ func _church() -> void:
 		b.cylinder(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3.ZERO), Vector3.ZERO, 1.5, 1.5, 0.06, 32, mats.clock_glow, true, 1.0, false)
 		b.box(cxf, Vector3(0, 0.45, 0.08), Vector3(0.1, 1.0, 0.03), mats.iron, 1.0, false)
 		b.box(cxf, Vector3(0.3, 0, 0.09), Vector3(0.7, 0.08, 0.03), mats.iron, 1.0, false)
-	# Copper spire with a gilded cross
-	b.cylinder(I, Vector3(CX, 34.2, 30.5), 4.0, 0.0, 29, 8, mats.copper)
-	bx(I, CX, 64.2, 30.5, 0.12, 2.4, 0.12, mats.brass)
-	bx(I, CX, 64.6, 30.5, 1.2, 0.12, 0.12, mats.brass)
+	_church_spire(Vector3(CX, 34.22, 30.5))
 	# Gothic west portal in the tower, stained glass round it, the great west window above (_church_portal)
 	_church_portal(CX, 26.0)
 	add_interactable(Vector3(CX, 1.6, 25.6), "[E] Ring the church bells", "church",
@@ -911,11 +908,23 @@ func _church() -> void:
 	# Nave
 	bx(I, CX, 7, 48, 14, 14, 26, rs, true)
 	church_rects.append(rect(CX - 7, 35, CX + 7, 61))
+	# the roof slopes run through the wall tops and the gable peaks, so the gables meet them with no gap; each slope
+	# carries on 0.6 m past the wall as the eave, with a fascia board along it and a ridge cap on top
 	var rise := 10.0
-	b.quad(I, Vector3(CX - 7.6, 13.6, 34.6), Vector3(CX - 7.6, 13.6, 61.4), Vector3(CX, 14 + rise, 61.4), Vector3(CX, 14 + rise, 34.6), mats.slate, Vector3(-1, 1, 0))
-	b.quad(I, Vector3(CX + 7.6, 13.6, 34.6), Vector3(CX + 7.6, 13.6, 61.4), Vector3(CX, 14 + rise, 61.4), Vector3(CX, 14 + rise, 34.6), mats.slate, Vector3(1, 1, 0))
+	var k := rise / 7.0
+	var ex := 7.6
+	var ey := 14.0 - (ex - 7.0) * k
+	for sx in [-1.0, 1.0]:
+		b.quad(I, Vector3(CX + sx * ex, ey, 34.6), Vector3(CX + sx * ex, ey, 61.4), Vector3(CX, 14 + rise, 61.4), Vector3(CX, 14 + rise, 34.6), mats.slate, Vector3(sx, 1, 0))
+		b.box(I, Vector3(CX + sx * (ex + 0.03), ey - 0.12, 48.0), Vector3(0.06, 0.3, 26.8), mats.dark_oak, 1.0, false)
+	b.box(I, Vector3(CX, 14 + rise + 0.08, 48.0), Vector3(0.36, 0.22, 26.9), mats.slate, 1.0, true)
 	b.tri(I, Vector3(CX - 7, 14, 35), Vector3(CX + 7, 14, 35), Vector3(CX, 14 + rise, 35), rs, Vector3.FORWARD)
 	b.tri(I, Vector3(CX - 7, 14, 61), Vector3(CX + 7, 14, 61), Vector3(CX, 14 + rise, 61), rs, Vector3.BACK)
+	# a stone coping along the top of each gable
+	for zg in [61.05]:
+		for sx in [-1.0, 1.0]:
+			var mid := Vector3(CX + sx * 3.5, 14 + rise / 2 + 0.12, zg)
+			b.box(Transform3D(Basis(Vector3.BACK, -sx * atan(k)), mid), Vector3.ZERO, Vector3(sqrt(49.0 + rise * rise) + 0.3, 0.24, 0.5), mats.palestone, 1.0, false)
 	# Apse
 	b.cylinder(I, Vector3(CX, 0, 61), 5.6, 5.6, 13, 8, rs, false)
 	b.cylinder(I, Vector3(CX, 13, 61), 6.0, 0.0, 6.5, 8, mats.slate)
@@ -937,6 +946,63 @@ func _church() -> void:
 			bx(f, u, 5, 0.8, 1.2, 10, 1.6, rs, true)
 			bx(f, u, 11, 0.5, 1.0, 2.5, 1.0, rs)
 			b.cylinder(f, Vector3(u, 12.25, 0.5), 0.45, 0.0, 2.2, 4, rs)
+
+
+## St. Marien's spire on the tower top at `base`: eight flat faces of patinated copper with a copper roll down
+## every edge, a stone parapet with merlons round its foot, four gabled lucarnes with louvres on the cardinal
+## faces, and a gilt ball with a cross on the top
+func _church_spire(base: Vector3) -> void:
+	var I := Transform3D.IDENTITY
+	var R := 3.9
+	var H := 29.0
+	var apex := base + Vector3(0, H, 0)
+	var ring: Array = []
+	for i in 8:
+		var a := TAU * (i + 0.5) / 8.0   # a flat face towards each side and each corner of the tower
+		ring.append(base + Vector3(cos(a) * R, 0, sin(a) * R))
+	for i in 8:
+		var p0: Vector3 = ring[i]
+		var p1: Vector3 = ring[(i + 1) % 8]
+		var mid := (p0 + p1) / 2
+		b.tri(I, p0, p1, apex, mats.copper, Vector3(mid.x - base.x, 0.15, mid.z - base.z).normalized(), 2.0)
+		# copper roll along the edge from p0 up to the apex
+		var d := apex - p0
+		var y := d.normalized()
+		var x := y.cross(Vector3.UP).normalized()
+		b.cylinder(Transform3D(Basis(x, y, x.cross(y)), p0), Vector3.ZERO, 0.07, 0.03, d.length(), 6, mats.copper, false, 1.0, false)
+	# foot of the spire: a stone band, and a parapet with merlons round the tower top
+	b.cylinder(I, base, R + 0.15, R + 0.05, 0.5, 8, mats.palestone, true, 2.0, true, TAU / 16.0)
+	for s in [-1.0, 1.0]:
+		for along_x in [true, false]:
+			var c: Vector3 = base + (Vector3(0, 0, s * 4.55) if along_x else Vector3(s * 4.55, 0, 0))
+			b.box(I, c + Vector3(0, 0.35, 0), Vector3(9.4, 0.7, 0.3) if along_x else Vector3(0.3, 0.7, 9.4), mats.palestone, 1.0, true)
+			for m in 5:
+				var u := -3.6 + m * 1.8
+				var mc: Vector3 = c + (Vector3(u, 0.95, 0) if along_x else Vector3(0, 0.95, u))
+				b.box(I, mc, Vector3(0.7, 0.5, 0.3) if along_x else Vector3(0.3, 0.5, 0.7), mats.palestone, 1.0, true)
+	# lucarnes on the four cardinal faces: a little gabled dormer with dark louvres
+	for dir in [Vector3(1, 0, 0), Vector3(-1, 0, 0), Vector3(0, 0, 1), Vector3(0, 0, -1)]:
+		var hgt := 4.2
+		var rr := R * (1.0 - hgt / H) * cos(TAU / 16.0)   # the face's distance from the axis at that height
+		var c: Vector3 = base + Vector3(0, hgt, 0) + dir * (rr + 0.25)
+		var f := Transform3D(Basis.looking_at(-dir, Vector3.UP), c)
+		b.box(f, Vector3(0, 0, -0.35), Vector3(1.3, 1.9, 1.3), mats.palestone, 1.0, true)
+		b.box(f, Vector3(0, -0.05, 0.31), Vector3(0.8, 1.4, 0.02), mats.recess, 1.0, false)
+		for k2 in 6:
+			b.box(Transform3D(f.basis * Basis(Vector3.RIGHT, 0.6), f * Vector3(0, -0.6 + k2 * 0.22, 0.34)), Vector3.ZERO, Vector3(0.78, 0.03, 0.14), mats.copper, 1.0, false)
+		for sx in [-1.0, 1.0]:   # gable roof over it
+			b.quad(f, Vector3(sx * 0.8, 0.9, 0.4), Vector3(sx * 0.8, 0.9, -1.0), Vector3(0, 1.6, -1.0), Vector3(0, 1.6, 0.4), mats.copper, Vector3(sx, 1, 0), 1.0, true)
+		b.tri(f, Vector3(-0.65, 0.95, 0.32), Vector3(0.65, 0.95, 0.32), Vector3(0, 1.5, 0.32), mats.palestone, Vector3.BACK)
+		b.cylinder(f, Vector3(0, 1.6, 0.35), 0.06, 0.0, 0.5, 6, mats.gilt, false, 1.0, false)
+	# the top: a gilt ball and a cross
+	var ball := SphereMesh.new()
+	ball.radius = 0.38
+	ball.height = 0.76
+	ball.radial_segments = 16
+	ball.rings = 8
+	b.mesh(Transform3D(Basis(), apex + Vector3(0, 0.25, 0)), ball, mats.gilt)
+	b.box(I, apex + Vector3(0, 1.55, 0), Vector3(0.14, 2.3, 0.14), mats.gilt, 1.0, true)
+	b.box(I, apex + Vector3(0, 2.0, 0), Vector3(1.2, 0.14, 0.14), mats.gilt, 1.0, true)
 
 
 # ----------------------------------------------------------------------------------------------
