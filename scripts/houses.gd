@@ -1639,7 +1639,8 @@ func _gothic_front(g: Transform3D, st: Dictionary, roof: Dictionary, wall: Mater
 		while zz < rz:
 			obox(g, 0.025, 0.85, 0.025, s * (AW / 2 - 0.08), top + 0.43, zz, iron, false)
 			zz += 0.24
-	obox(g, AW, 0.04, AZ + AD - D / 2, 0, 0.02, (AZ + AD + D / 2) / 2, w.mats.sandstone, false)
+	# the arcade floor stands a little above the garden path (at 4 cm) that runs under it to the door
+	obox(g, AW, 0.07, AZ + AD - D / 2, 0, 0.035, (AZ + AD + D / 2) / 2, w.mats.sandstone, false)
 	var bay := AW / bays
 	var colm := CylinderMesh.new()
 	colm.top_radius = 0.17
@@ -1678,9 +1679,10 @@ func _arcade_wall(f: Transform3D, AW: float, top: float, bays: int, ow: float, s
 		be.ring_walls(f, pts, depth, mat, false, 3.0, true, true)
 		# piers either side of the opening
 		var x0 := -AW / 2 + i * bay
-		for pr in [[x0, cx - ow / 2], [cx + ow / 2, x0 + bay]]:
+		# (the face towards the opening is left out: the arch's reveal above already lines it, in the same plane)
+		for pr in [[x0, cx - ow / 2, [null, mat, mat, mat, mat, mat]], [cx + ow / 2, x0 + bay, [mat, null, mat, mat, mat, mat]]]:
 			var pw: float = pr[1] - pr[0]
-			be.box(f, Vector3((pr[0] + pr[1]) / 2, (top - 0.05) / 2, depth / 2), Vector3(pw, top + 0.05, depth), mat, 1.0, true)
+			be.box(f, Vector3((pr[0] + pr[1]) / 2, (top - 0.05) / 2, depth / 2), Vector3(pw, top + 0.05, depth), pr[2], 1.0, true)
 		col(f, x0 + (cx - ow / 2 - x0) / 2, depth / 2, cx - ow / 2 - x0, depth, top)
 
 
@@ -1755,7 +1757,7 @@ func _garage(g: Transform3D, wall: Material, idx: int, st: Dictionary) -> void:
 	wb.call(0.35, GH, 0.2, xR - 0.175, GH / 2, zF - 0.1, 5)
 	wb.call(GW, 0.6, 0.2, gx, GH - 0.3, zF - 0.1, 5)              # header
 	be.box(g, Vector3(gx, GH + 0.11, gz), Vector3(GW, 0.22, GD), [wall, wall, wall, hm.ceil, wall, wall], 1.0, true, true)
-	box(g, GW - 0.4, 0.05, GD - 0.2, gx, 0.03, gz - 0.05, hm.concrete)
+	box(g, GW - 0.4, 0.06, GD - 0.2, gx, 0.04, gz - 0.05, hm.concrete)   # clear of the driveway pavers under it
 	# sectional door rolled up under the ceiling, on its tracks
 	box(g, 5.9, 0.06, 3.4, gx, GH - 0.45, zF - 1.9, door_mat)
 	for s in [-1.0, 1.0]:

@@ -668,6 +668,17 @@ func _smoke_test() -> void:
 		await get_tree().create_timer(0.1).timeout
 	assert(sfx.bell_stream != null)
 	print("SMOKE: bell ready, %.1f s long" % sfx.bell_stream.get_length())
+	# the bells must not knock out the sound effects (they used to share the effect pool's counter)
+	sfx._next = 11
+	sfx.strike_hour(2)
+	await get_tree().create_timer(3.2).timeout
+	sfx.footstep("pavement")
+	var playing := 0
+	for pl in sfx._pool:
+		if pl.playing and pl.stream == sfx.streams.step_hard:
+			playing += 1
+	print("SMOKE: footstep after the bells struck: %s" % ("plays" if playing > 0 else "SILENT"))
+	assert(playing > 0)
 	print("SMOKE: parcels %d -> %d, stored %d, score %d, backpack %d, player y %.2f" % [before, parcels.records.size(), parcels.stored_total(), score, backpack.size(), player.global_position.y])
 	get_tree().quit(0 if parcels.stored_total() == 1 else 1)
 
@@ -1051,6 +1062,7 @@ func _screenshot_mode() -> void:
 	_shots.append([Vector3(-160, 2.4, 14), "cam", Vector3(-172, 0.5, -10), 13.0, "depot_full", 70.0])
 	_shots.append([Vector3(-4.0, 0.0, 0.5), "hcam", Vector3(0.2, 1.7, 6.0), 14.0, "floor_in", 75.0, 0])
 	_shots.append([Vector3(-4.0, 0.0, 2.5), "hcam", Vector3(0.0, 1.7, 9.5), 14.0, "floor_entry", 75.0, 3])
+	_shots.append([Vector3(-0.6, 0.6, 7.6), "hcam", Vector3(0.9, 1.9, 11.0), 16.0, "arcade_entry", 75.0, 3])
 	_shots.append([Vector3(0.3, 1.7, -186.5), "cam", Vector3(0, 0, -200), 15.0, "bridge_on", 75.0])
 	_shots.append([Vector3(1.5, 1.7, -196.0), "cam", Vector3(-1, 0, -203), 15.0, "bridge_mid", 75.0])
 	_shots.append([Vector3(0.0, 0.0, -2.0), "hcam", Vector3(0.0, 1.7, 9.0), 14.0, "floor_door", 75.0, 0])

@@ -15,6 +15,7 @@ var music: AudioStreamPlayer
 var ambient: AudioStreamPlayer
 var _pool: Array[AudioStreamPlayer] = []
 var _next := 0
+var _bell_next := 0
 var _nature_t := 3.0
 var rng := RandomNumberGenerator.new()
 var engine: AudioStreamPlayer
@@ -95,6 +96,7 @@ func toggle() -> bool:
 func play(name: String, db := 0.0, pitch := 1.0) -> void:
 	if not enabled or not streams.has(name):
 		return
+	_next %= _pool.size()
 	var p := _pool[_next]
 	_next = (_next + 1) % _pool.size()
 	p.stream = streams[name]
@@ -235,8 +237,9 @@ func _update_bells(delta: float) -> void:
 		var e: Dictionary = _bell_queue.pop_front()
 		if not enabled:
 			continue
-		var p: AudioStreamPlayer3D = bell_players[_next % bell_players.size()]
-		_next += 1
+		var p: AudioStreamPlayer3D = bell_players[_bell_next % bell_players.size()]
+		_bell_next = (_bell_next + 1) % bell_players.size()   # its own counter: sharing _next with the effect pool
+		# once pushed it past the pool's end, and every footstep and pick-up sound after that failed
 		p.stream = bell_stream
 		p.pitch_scale = e.pitch
 		p.volume_db = e.db + 6.0
