@@ -732,12 +732,54 @@ func blocked(x: float, z: float, r: float, include_truck := false) -> bool:
 	return false
 
 
-## How deep the truck at (x, z) facing h overlaps anything solid: summed over the three circles down its length
+## How deep the truck at (x, z) facing h overlaps anything solid, using its real rectangle (7.6 x 2.6 m): for
+## each solid nearby, how far the truck would have to move to clear it (separating-axis test), summed; plus the
+## corners past the town wall or in a pond. This shrinks steadily as the truck comes out, so a truck caught on a
+## trunk or post can always work itself free, and grows as it pushes in, so it can't drive into one.
+const HL := 3.8
+const HW := 1.3
 func _overlap(x: float, z: float, h: float) -> float:
+	if not _grid_built:
+		_build_grid()
+	var f := Vector2(cos(h), sin(h))
+	var l := Vector2(-sin(h), cos(h))
+	var c := Vector2(x, z)
 	var sum := 0.0
-	for o in [-2.6, 0.0, 2.6]:
-		sum += _circle_depth(x + cos(h) * o, z + sin(h) * o, 1.2)
+	var seen := {}
+	for cx in range(floori((x - 5.0) / 16.0), floori((x + 5.0) / 16.0) + 1):
+		for cz in range(floori((z - 5.0) / 16.0), floori((z + 5.0) / 16.0) + 1):
+			for rc in _grid.get(Vector2i(cx, cz), []):
+				var rr: Rect2 = rc
+				if seen.has(rr) or rr.end.x < x - 4.2 or rr.position.x > x + 4.2 or rr.end.y < z - 4.2 or rr.position.y > z + 4.2:
+					continue
+				seen[rr] = true
+				sum += _box_pen(c, f, l, rr)
+	var F: float = world.FENCE - 0.5
+	for o in [Vector2(HL, HW), Vector2(HL, -HW), Vector2(-HL, HW), Vector2(-HL, -HW)]:
+		var p: Vector2 = c + f * o.x + l * o.y
+		sum += maxf(0.0, absf(p.x) - F) + maxf(0.0, absf(p.y) - F)
+		for lk in world.lakes:
+			var k := sqrt(pow((p.x - lk.cx) / lk.rw, 2) + pow((p.y - lk.cz) / lk.rd, 2))
+			if k < 1.0:
+				sum += (1.0 - k) * minf(lk.rw, lk.rd)
 	return sum
+
+
+## Penetration of the truck rectangle (centre c, forward f, left l) into an axis-aligned box: the smallest
+## overlap over the four separating axes (0 when they are apart)
+func _box_pen(c: Vector2, f: Vector2, l: Vector2, rr: Rect2) -> float:
+	var rc := rr.get_center()
+	var rh := rr.size / 2.0
+	var d := rc - c
+	var best := INF
+	for n in [Vector2(1, 0), Vector2(0, 1), f, l]:
+		var th: float = HL * absf(f.dot(n)) + HW * absf(l.dot(n))
+		var bh: float = rh.x * absf(n.x) + rh.y * absf(n.y)
+		var ov: float = th + bh - absf(d.dot(n))
+		if ov <= 0.0:
+			return 0.0
+		best = minf(best, ov)
+	return best
 
 
 ## How far a circle of radius r at (x, z) reaches into the town's solids, the ponds or past the wall (0 = clear)
@@ -807,7 +849,21 @@ func _physics_process(dt: float) -> void:
 		# or a wall, backing out or turning away must still work (it used to count as blocked too, and stuck)
 		var now_in := _overlap(pos.x, pos.y, heading)
 		var then_in := _overlap(nx, nz, nh)
-		var hit := then_in > 0.0005 and then_in >= now_in - 0.0005
+		var hit := then_in > now_in + 0.0005   # deeper in: refuse; level or coming out: let it go
+		if hit and now_in > 0.001:
+			# already caught on something (a trunk inside a corner): scrape free, nudging 5 cm whichever way
+			# reduces the overlap most, sideways included
+			var f0 := Vector2(cos(heading), sin(heading))
+			var l0 := Vector2(-sin(heading), cos(heading))
+			var best := now_in
+			var best_d := Vector2.ZERO
+			for dd in [l0, -l0, f0, -f0, (l0 + f0).normalized(), (l0 - f0).normalized(), (-l0 + f0).normalized(), (-l0 - f0).normalized()]:
+				var o := _overlap(pos.x + dd.x * 0.05, pos.y + dd.y * 0.05, heading)
+				if o < best - 0.0005:
+					best = o
+					best_d = dd
+			if best_d != Vector2.ZERO:
+				pos += best_d * 0.05
 		if hit:
 			if absf(speed) > 3.0:
 				game.sfx.play("land", -4.0)

@@ -1071,6 +1071,45 @@ func _kicks_test() -> void:
 		truck.speed = 0.0
 		truck.exit()
 	print("KICKS: truck backing away from a lamp post it had run into: moved %.1f m" % escaped)
+	# a tree: with a trunk caught inside its rear corner the truck can still drive off, and driving straight at a
+	# trunk stops at it instead of going into it
+	var tree_out := -1.0
+	var tree_inside := true
+	for tree_xz in world.tree_spots:
+		var tp: Vector2 = tree_xz
+		var open_ok := true
+		for a in 8:   # pick a tree standing in the open (room for the truck all round)
+			var q := tp + Vector2(cos(a * TAU / 8.0), sin(a * TAU / 8.0)) * 9.0
+			if truck._circle_depth(q.x, q.y, 2.0) > 0.0 or world.house_at(q.x, q.y):
+				open_ok = false
+				break
+		if not open_ok:
+			continue
+		# the trunk at the truck's rear left corner, inside the body
+		truck.heading = 0.0
+		truck.pos = tp - Vector2(-3.3, 1.0)
+		truck.speed = 0.0
+		var p0: Vector2 = truck.pos
+		truck.enter()
+		player.move_input = Vector2(0, -1)   # forward
+		for i in 120:
+			await get_tree().physics_frame
+		tree_out = truck.pos.distance_to(p0)
+		# head-on: 8 m away, drive at it
+		player.move_input = Vector2.ZERO
+		truck.speed = 0.0
+		truck.heading = 0.0
+		truck.pos = tp - Vector2(8.0 + 3.8, 0.0)
+		player.move_input = Vector2(0, -1)
+		for i in 180:
+			await get_tree().physics_frame
+		player.move_input = Vector2.ZERO
+		var d: Vector2 = tp - truck.pos
+		tree_inside = absf(d.dot(truck.fwd())) < 3.8 + 0.3 and absf(d.dot(Vector2(-truck.fwd().y, truck.fwd().x))) < 1.3 + 0.3
+		truck.speed = 0.0
+		truck.exit()
+		print("KICKS: tree at %s: truck with the trunk in its corner drove off %.1f m; driving at it stopped %.1f m short (into it: %s)" % [tp, tree_out, d.length() - 3.8, tree_inside])
+		break
 	# parcels dropped onto the truck from above bounce off it: none ends up on the roof or inside the truck
 	truck.pos = Vector2(-25, 2.5)
 	truck.heading = PI
@@ -1111,7 +1150,7 @@ func _kicks_test() -> void:
 	print("KICKS: parcels inside one another: %d at the start, %d after all the knocking" % [overlaps_start, overlaps_end])
 	print("KICKS: parcels hanging across a kerb edge: %d; truck half on the pavement: ride %.2f m, roll %.1f deg, deepest wheel sinks %.2f m" % [straddle, ride_on_kerb, rad_to_deg(roll_on_kerb), sink])
 	print("KICKS: truck plough: up to %d parcels tumbling at once; avg %d us, worst %d us per frame; %d still moving after, %d left floating" % [tmoving, tt / maxi(tf, 1), tw, still, floating])
-	get_tree().quit(0 if moved > 0 and still == 0 and floating == 0 and straddle == 0 and sink < 0.08 and kicked_on_top == 0 and overlaps_end == 0 and escaped > 1.0 and on_truck == 0 else 1)
+	get_tree().quit(0 if moved > 0 and still == 0 and floating == 0 and straddle == 0 and sink < 0.08 and kicked_on_top == 0 and overlaps_end == 0 and escaped > 1.0 and on_truck == 0 and tree_out > 1.0 and not tree_inside else 1)
 
 
 ## Walk from the Ulmenstraße onto its pavement at walking speed, head-on and at a slant, and off again
