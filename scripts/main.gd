@@ -976,6 +976,20 @@ func _screenshot_mode() -> void:
 		[Vector3(-45, 0.1, 130), "duck", 1, 10.0, "hen", 20.0],
 		[Vector3(0, 0.1, 30), "moon", 0.0, 23.0, "moonwide", 75.0],
 		[Vector3(-25.6, 0.9, 5.9), "cam", Vector3(-27.55, 0.45, 3.5), 15.0, "truck_wheel", 50.0],
+	]
+	# one house of each interior layout (houses.gd LAYOUTS): Classic 8, Open plan 4, Parlour 1, Family 0, Scholar 3
+	for lh in [[0, 8], [1, 4], [2, 1], [3, 0], [4, 3]]:
+		var h: int = lh[1]
+		var tag := "lay%d_" % lh[0]
+		_shots.append_array([
+			[Vector3(-5.0, 1.0, 1.5), "hcam", Vector3(0.3, 1.6, 6.2), 14.0, tag + "living", 75.0, h],
+			[Vector3(6.0, 1.0, 2.2), "hcam", Vector3(0.6, 1.7, 5.8), 14.0, tag + "front_right", 75.0, h],
+			[Vector3(6.2, 0.8, -5.5), "hcam", Vector3(2.0, 1.7, -1.5), 14.0, tag + "back_right", 75.0, h],
+			[Vector3(7.0, 4.3, 4.3), "hcam", Vector3(2.4, 5.3, 2.5), 14.0, tag + "up_front", 75.0, h],
+			[Vector3(5.5, 4.2, -5.0), "hcam", Vector3(2.6, 5.3, -1.6), 14.0, tag + "up_back", 75.0, h],
+			[Vector3(-1.6, 4.0, -5.6), "hcam", Vector3(1.7, 5.2, -2.0), 14.0, tag + "up_mid", 75.0, h],
+		])
+	_shots.append_array([
 		[Vector3(-20.6, 0.9, 6.2), "cam", Vector3(-22.7, 0.45, 3.7), 15.0, "truck_rwheel", 50.0],
 		[Vector3(0.0, 3.8, 7.0), "hcam", Vector3(0.0, 1.8, 18.0), 14.0, "fresco_gothic", 60.0, 3],
 		[Vector3(0.0, 3.8, 7.0), "hcam", Vector3(0.0, 1.8, 18.0), 14.0, "fresco_plain", 60.0, 7],
@@ -992,10 +1006,15 @@ func _screenshot_mode() -> void:
 		[Vector3(-34, 27.0, 52.0), "cam", Vector3(-45, 23.5, 35.0), 15.0, "clock_church", 40.0],
 		[Vector3(9.0, 1.7, -178.0), "cam", Vector3(6.5, 22.0, -181.5), 15.0, "nordtor_turret", 70.0],
 		[Vector3(14, 2.0, -158), "cam", Vector3(0, 13.0, -182), 22.5, "nordtor_night", 60.0],
-	]
+	])
+	_shots.append([Vector3(-160, 2.4, 14), "cam", Vector3(-172, 0.5, -10), 13.0, "depot_full", 70.0])
+	_shots.append([Vector3(-44, 1.7, 18), "cam", Vector3(-38, 0.3, 8), 14.0, "parcel_colours", 70.0])
 	# `--only a,b` renders just the named views
 	var args := OS.get_cmdline_user_args()
 	var only: PackedStringArray = args[args.find("--only") + 1].split(",") if "--only" in args else PackedStringArray()
+	if only.is_empty() or "depot_full" in only:   # fill the depot a little, to see the stacks
+		for k in 420:
+			parcels.store(["S", "M", "L"][k % 3])
 	for s in _shots:
 		if only.size() > 0 and not (s[4] in only):
 			continue

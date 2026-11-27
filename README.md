@@ -64,7 +64,7 @@ Then open the project once (or run `--import`) so Godot re-imports them. The `_n
 |---|---|---|
 | `scripts/main.gd` | game.js | Game manager: backpack, depot, score, day/night, lamp light pool |
 | `scripts/world.gd` | world.js, oldtown.js, gothic.js, warehouse.js, citywall.js, townsquares.js | Builds the town: streets, house lots, church, depot, wall and Nordtor, park, ponds, trees, mountains |
-| `scripts/houses.gd` | houses.js, oldtown.js, gothic.js | The houses: shells with windows, doors, stairs, furnished rooms, garages and workshops, roofs, timber frames and Gothic fronts. The unchanging parts are built once and stamped into each house |
+| `scripts/houses.gd` | houses.js, oldtown.js, gothic.js | The houses: shells with windows, doors, stairs, furnished rooms, garages and workshops, roofs, timber frames and Gothic fronts. Five room layouts (Classic, Open plan, Parlour, Family, Scholar: kitchen-diners, walled living rooms, libraries, master suites, a nursery), each built once and stamped into its houses; every house paints its walls and covers its sofas in three of eight palette colours |
 | `scripts/castle.gd` | castle.js | The castle crag, walls, towers, gatehouse, keep, Palas, banner, track and slope forest |
 | `scripts/truck.gd` | truck.js | The drivable delivery truck |
 | `scripts/moat.gd` | moat.js | The moat, drawbridge and bridgehead |

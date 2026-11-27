@@ -35,7 +35,43 @@ var tpl_bi
 var null_b
 var mode := 0             # 0 normal, 1 recording the template, 2 per-house parts only
 var tpl_ext: Array = []
-var tpl_int: Array = []
+var tpl_ints := {}        # layout index -> baked interior template
+var lay: Dictionary = {}  # the layout being built (LAYOUTS entry)
+var pal: Array = []       # the house's three palette colours: [walls, partitions, fabric]
+
+## Five ways of dividing the house into rooms. The stairs, the hall wall across the middle and the bathroom stay
+## put; around them: g_front "open" (living room, hall and dining in one) or "walled" (living room behind its own
+## wall and door); g_back "guest" / "library" (two back rooms) or "diner" (one big kitchen-diner, and then a
+## library lounge at the front instead of the dining room); up_front "split" (master bedroom | study) or "suite"
+## (one master suite with a sitting area); up_back "bedroom" / "library" (one back room) or "nursery" (two).
+const LAYOUTS := [
+	{"name": "Classic", "g_front": "open", "g_back": "guest", "up_front": "split", "up_back": "bedroom"},
+	{"name": "Open plan", "g_front": "open", "g_back": "diner", "up_front": "split", "up_back": "bedroom"},
+	{"name": "Parlour", "g_front": "walled", "g_back": "library", "up_front": "suite", "up_back": "bedroom"},
+	{"name": "Family", "g_front": "walled", "g_back": "diner", "up_front": "split", "up_back": "nursery"},
+	{"name": "Scholar", "g_front": "open", "g_back": "guest", "up_front": "suite", "up_back": "library"},
+]
+## The interior palette: each house combines three of these - two (softened) for its walls, one (deepened) for
+## the sofas and chairs
+const PALETTE := ["#b5543c", "#d9a441", "#7c9a6d", "#3e6a86", "#8a5f84", "#c9b48a", "#4f6f62", "#c97b84"]
+
+
+## Same hash as world.gd's jhash (oldtown.js hash)
+static func _hash(a: int, b: int, c: int) -> float:
+	var M := 0xffffffff
+	var h := (((a & M) * 374761393) & M) + (((b & M) * 668265263) & M) + (((c & M) * 1274126177) & M)
+	h &= M
+	h = (((h ^ (h >> 13)) & M) * 1274126177) & M
+	h = (h ^ (h >> 16)) & M
+	return float(h) / 4294967296.0
+
+
+static func layout_of(idx: int) -> int:
+	return int(_hash(idx, 31, 77) * LAYOUTS.size()) % LAYOUTS.size()
+
+
+func _paint(c: Color, tile: float) -> Material:
+	return w.tmat("plaster_f4f2ee", Vector2(tile, tile), {"rough": 0.92, "tint": c.lerp(Color.WHITE, 0.5)})
 var WALL_PH := StandardMaterial3D.new()   # stands in for the house's wall material in the template
 var hm := {}
 var doors: Array = []     # [{hinge, angle, target, shape}]
@@ -75,12 +111,15 @@ func _set_mode(m: int) -> void:
 	vbi = null_b if m == 1 else real_bi
 
 
-func _record_template() -> void:
+func _record_template(li: int) -> void:
 	_set_mode(1)
+	lay = LAYOUTS[li]
 	_shell(Transform3D.IDENTITY, WALL_PH, {"number": 0})
 	_interior(Transform3D.IDENTITY, {"number": 0})
-	tpl_ext = tpl_be.bake()
-	tpl_int = tpl_bi.bake()
+	var ext: Array = tpl_be.bake()
+	if tpl_ext.is_empty():
+		tpl_ext = ext
+	tpl_ints[li] = tpl_bi.bake()
 	_set_mode(0)
 
 
@@ -211,8 +250,8 @@ func _materials() -> void:
 		window_mats.append({"mat": g, "lit": lit})
 
 
-func fabric(hex: String) -> Dictionary:
-	return {"mat": hm._vc_fabric, "color": Color(hex)}
+func fabric(c) -> Dictionary:   # a hex string or a Color
+	return {"mat": hm._vc_fabric, "color": c if c is Color else Color(c)}
 
 
 func _glaze(hex: String) -> Dictionary:
@@ -444,12 +483,26 @@ func wall_brace(xf: Transform3D, side: String, u0: float, v0: float, u1: float, 
 
 # ---------------------------------------------------------------------------------------------- the house
 func build(idx: int, xf: Transform3D, st: Dictionary, cfg: Dictionary, wall: Material) -> Dictionary:
-	if tpl_ext.is_empty():
-		_record_template()
-	real_be.append_baked(xf, tpl_ext, {WALL_PH: wall})
-	real_bi.append_baked(xf, tpl_int)
+	var li := layout_of(idx)
+	if not tpl_ints.has(li):
+		_record_template(li)
+	lay = LAYOUTS[li]
+	# three different palette colours for this house
+	var a := int(_hash(idx, 32, 77) * 8.0) % 8
+	var b := (a + 1 + int(_hash(idx, 33, 77) * 7.0) % 7) % 8
+	var c := (b + 1 + int(_hash(idx, 34, 77) * 7.0) % 7) % 8
+	if c == a:
+		c = (c + 1) % 8
+		if c == b:
+			c = (c + 1) % 8
+	pal = [Color(PALETTE[a]), Color(PALETTE[b]), Color(PALETTE[c])]
+	var paint_a := _paint(pal[0], 6.5)
+	var paint_b := _paint(pal[1], 3.0)
+	real_be.append_baked(xf, tpl_ext, {WALL_PH: wall, hm.plaster: paint_a})
+	real_bi.append_baked(xf, tpl_ints[li], {hm.plaster: paint_a, hm.plaster3: paint_b})
 	_set_mode(2)
 	_shell(xf, wall, cfg)
+	interiors[interiors.size() - 1].layout = li
 	_interior(xf, cfg)
 	_set_mode(0)
 	var roof := gable_roof(be, xf, {"cx": 0.0, "cz": 0.0, "span": W if st.ridge_z else D, "length": D if st.ridge_z else W,
@@ -650,6 +703,8 @@ func _stairs(xf: Transform3D) -> void:
 static func room_light_spots(rec: Dictionary, upstairs: bool) -> Array:
 	var spots := [[-3.5, 4.4], [4.4, 4.4], [-5.1, -3.9], [2.6, -3.9], [-1.0, 0.8]] if upstairs \
 		else [[-4.5, 2.6], [4.2, 3.6], [-3.8, -4.0], [4.6, -4.0], [0.6, 1.0]]
+	if upstairs and LAYOUTS[rec.get("layout", 0)].up_back == "nursery":
+		spots = [[-3.5, 4.4], [4.4, 4.4], [-5.1, -3.9], [-0.2, -3.9], [5.0, -3.9]]
 	var y := UP + 2.0 if upstairs else 2.6
 	var out: Array = []
 	var xf: Transform3D = rec.xf
@@ -670,10 +725,11 @@ func house_at(x: float, z: float):
 # ---------------------------------------------------------------------------------------------- interior
 func _interior(xf: Transform3D, cfg: Dictionary) -> void:
 	var n: int = cfg.number
-	var sofa_colors := ["#5d6b78", "#7a5c4a", "#55684f", "#6e6a63", "#8a4f4a", "#4a5466", "#786b55", "#5f5a70"]
-	var fab := fabric(sofa_colors[n % sofa_colors.size()])
-	var duvet := fabric(sofa_colors[(n + 3) % sofa_colors.size()])
-	var duvet2 := fabric(sofa_colors[(n + 5) % sofa_colors.size()])
+	# fabrics from the house's palette colours: sofas and chairs deepened, the duvets softer
+	var cols: Array = pal if pal.size() == 3 else [Color("#c9b48a"), Color("#7c9a6d"), Color("#3e6a86")]
+	var fab := fabric((cols[2] as Color).darkened(0.25))
+	var duvet := fabric((cols[0] as Color).lerp(Color.WHITE, 0.3))
+	var duvet2 := fabric((cols[1] as Color).lerp(Color.WHITE, 0.25))
 	fab.vary = true
 	duvet.vary = true
 	duvet2.vary = true
@@ -688,8 +744,20 @@ func _interior(xf: Transform3D, cfg: Dictionary) -> void:
 	wall_p.call(IX - 0.8, t, (0.8 + IX) / 2, pz, 0, SLAB0)
 	col(xf, (0.8 + IX) / 2, pz, IX - 0.8, t, 3.4)
 	wall_p.call(1.4, t, 0.1, pz, 2.3, SLAB0 - 2.3)
-	wall_p.call(t, IZ - 2.5, 1.5, (-IZ - 2.5) / 2, 0, SLAB0)
-	col(xf, 1.5, (-IZ - 2.5) / 2, t, IZ - 2.5, 3.4)
+	if lay.g_back != "diner":   # kitchen | back room
+		wall_p.call(t, IZ - 2.5, 1.5, (-IZ - 2.5) / 2, 0, SLAB0)
+		col(xf, 1.5, (-IZ - 2.5) / 2, t, IZ - 2.5, 3.4)
+	if lay.g_front == "walled":   # the living room behind its own wall, a door from the hall at z 3.4 - 4.6
+		var lx := -0.9
+		var za := pz + t / 2
+		wall_p.call(t, 3.4 - za, lx, (za + 3.4) / 2, 0, SLAB0)
+		col(xf, lx, (za + 3.4) / 2, t, 3.4 - za, 3.4)
+		wall_p.call(t, IZ - 4.6, lx, (4.6 + IZ) / 2, 0, SLAB0)
+		col(xf, lx, (4.6 + IZ) / 2, t, IZ - 4.6, 3.4)
+		wall_p.call(t, 1.2, lx, 4.0, 2.3, SLAB0 - 2.3)
+		box(xf, 0.16, 2.35, 0.08, lx, 1.175, 3.36, hm.trim)
+		box(xf, 0.16, 2.35, 0.08, lx, 1.175, 4.64, hm.trim)
+		box(xf, 0.16, 0.08, 1.36, lx, 2.34, 4.0, hm.trim)
 	# Upper: hall | front rooms (z 2.0), hall | back rooms (z -1.0), master | study (x 1.0), bath | bedroom (x -2.5)
 	var H2 := CEIL2 - UP
 	var up_wall := func(x0: float, x1: float, z0: float, z1: float, door_list: Array) -> void:
@@ -723,8 +791,13 @@ func _interior(xf: Transform3D, cfg: Dictionary) -> void:
 			else:
 				wall_p.call(t, L, fixed, c, UP + 2.2, H2 - 2.2)
 	up_wall.call(-IX, IX, 2.0, 2.0, [[-1.9, -0.6], [2.0, 3.3]])
-	up_wall.call(-IX, IX, pz, pz, [[-4.4, -3.1], [-2.0, -0.7]])
-	up_wall.call(1.0, 1.0, 2.0 + t / 2, IZ, [])
+	if lay.up_back == "nursery":   # a third door off the landing, past the top of the stairs
+		up_wall.call(-IX, IX, pz, pz, [[-4.4, -3.1], [-2.0, -0.7], [6.35, 7.45]])
+		up_wall.call(2.2, 2.2, -IZ, pz - t / 2, [])
+	else:
+		up_wall.call(-IX, IX, pz, pz, [[-4.4, -3.1], [-2.0, -0.7]])
+	if lay.up_front == "split":
+		up_wall.call(1.0, 1.0, 2.0 + t / 2, IZ, [])
 	up_wall.call(-2.5, -2.5, -IZ, pz - t / 2, [])
 
 	# Skirting boards round the outside walls on both floors
@@ -741,7 +814,33 @@ func _interior(xf: Transform3D, cfg: Dictionary) -> void:
 
 	_living_room(xf, fab, n)
 	_kitchen(xf)
-	# ---- Guest bedroom (ground floor, back right) ----
+	match lay.g_back:
+		"guest":
+			_guest_room(xf, duvet, n)
+		"library":
+			_library(xf, fab, n, 0.0, [5.25, 6.7], [-3.4, -1.95])
+		"diner":   # the dining table at the back, a sideboard and books along the back wall
+			_dining(xf, 4.6, -3.9)
+			box(xf, 1.8, 0.85, 0.45, 4.6, 0.425, -IZ + 0.23, hm.wood_mid)
+			solid(xf, 4.6, -IZ + 0.23, 1.8, 0.5)
+			plant(xf, 4.1, 0.85, -IZ + 0.25, 0.5)
+			bookshelf(xf, 7.6, -2.4, -PI / 2, 1.4)
+			rug(xf, 4.6, 0.045, -3.9, 2.8, 2.0, n + 1)
+
+	_upstairs(xf, duvet, duvet2, n, fab)
+
+	# Ceiling lights (glow when the house light is on)
+	var fixtures := [[-4.5, 2.6, SLAB0], [4.2, 3.6, SLAB0], [-3.5, -4.0, SLAB0], [4.6, -4.0, SLAB0],
+			[-3.5, 4.4, CEIL2], [4.4, 4.4, CEIL2], [-5.1, -3.9, CEIL2], [2.6, -3.9, CEIL2], [-3.0, 0.5, CEIL2]]
+	if lay.up_back == "nursery":
+		fixtures[7] = [5.0, -3.9, CEIL2]
+		fixtures.append([-0.2, -3.9, CEIL2])
+	for f in fixtures:
+		prim(xf, _cyl(0.28, 0.32, 0.08, 20), fixture_mat, Vector3(f[0], f[2] - 0.04, f[1]))
+
+
+## Guest bedroom (ground floor, back right)
+func _guest_room(xf: Transform3D, duvet: Dictionary, n: int) -> void:
 	box(xf, 1.75, 0.32, 2.1, 5.0, 0.16, -5.7, hm.wood_dark)
 	box(xf, 1.62, 0.22, 2.0, 5.0, 0.43, -5.7, hm.linen)
 	box(xf, 1.66, 0.08, 1.45, 5.0, 0.57, -5.2, duvet)
@@ -756,25 +855,92 @@ func _interior(xf: Transform3D, cfg: Dictionary) -> void:
 	solid(xf, 7.45, -2.6, 0.6, 1.6)
 	rug(xf, 5.0, 0.045, -4.4, 2.2, 1.4, n + 1)
 
-	_upstairs(xf, duvet, duvet2, n)
 
-	# Ceiling lights (glow when the house light is on)
-	for f in [[-4.5, 2.6, SLAB0], [4.2, 3.6, SLAB0], [-3.5, -4.0, SLAB0], [4.6, -4.0, SLAB0],
-			[-3.5, 4.4, CEIL2], [4.4, 4.4, CEIL2], [-5.1, -3.9, CEIL2], [2.6, -3.9, CEIL2], [-3.0, 0.5, CEIL2]]:
-		prim(xf, _cyl(0.28, 0.32, 0.08, 20), fixture_mat, Vector3(f[0], f[2] - 0.04, f[1]))
+## A library in the back-right room (x 1.6 - 7.8, z -6.8 - -1.1) on floor y0: bookcases along the back and right
+## walls, a reading armchair with a lamp, a writing desk and a rug
+## backs / rights: where the bookcases go along the back wall (x) and the right wall (z), clear of the windows
+func _library(xf: Transform3D, fab: Dictionary, n: int, y0: float, backs: Array, rights: Array, desk := true) -> void:
+	for xc in backs:
+		bookshelf(xf, xc, -IZ + 0.2, 0.0, 1.4, y0)
+	for zc in rights:
+		bookshelf(xf, IX - 0.2, zc, -PI / 2, 1.4, y0)
+	armchair(xf, 5.4, -2.7, PI, fab, y0)
+	floor_lamp(xf, 6.4, -2.0, y0)
+	rug(xf, 4.8, y0 + 0.045, -4.0, 2.6, 1.8, n + 3)
+	if not desk:
+		return
+	box(xf, 1.3, 0.05, 0.65, 2.7, y0 + 0.74, -4.4, hm.wood_dark)
+	legs(xf, 2.7, -4.4, 1.3, 0.65, 0.72, hm.wood_dark, y0)
+	solid(xf, 2.7, -4.4, 1.3, 0.65, y0, 0.8)
+	box(xf, 0.42, 0.05, 0.42, 2.7, y0 + 0.45, -3.75, hm.wood_mid)
+	legs(xf, 2.7, -3.75, 0.42, 0.42, 0.43, hm.wood_mid, y0)
+	box(xf, 0.42, 0.45, 0.04, 2.7, y0 + 0.72, -3.55, hm.wood_mid)
+	table_lamp(xf, 2.25, y0 + 0.765, -4.55)
+
+
+## Footprint of a w x d piece turned by rot (multiples of 90 degrees) as a house-space collider
+func _solid_rot(xf: Transform3D, x: float, z: float, ww: float, dd: float, rot: float, y0 := 0.0, h := 2.2) -> void:
+	var q := absf(sin(rot)) > 0.5
+	solid(xf, x, z, dd if q else ww, ww if q else dd, y0, h)
+
+
+## Sofa of length L seating towards local +z (rot turns it about y): base, back, arms, seat and back cushions,
+## two scatter cushions
+func sofa(xf: Transform3D, x: float, z: float, rot: float, L: float, fab: Dictionary, y0 := 0.0) -> void:
+	var g := xf * Transform3D(Basis(Vector3.UP, rot), Vector3(x, y0, z))
+	var cush := fabric((pal[1] as Color).lerp(Color.WHITE, 0.35) if pal.size() == 3 else Color("#d9c9a6"))
+	cush.vary = true
+	box(g, L, 0.42, 0.95, 0, 0.21, 0, fab)
+	box(g, L, 0.85, 0.25, 0, 0.5, -0.35, fab)
+	for s in [-1.0, 1.0]:
+		box(g, 0.22, 0.62, 0.95, s * (L / 2 - 0.11), 0.31, 0, fab)
+		box(g, L / 2 - 0.26, 0.14, 0.75, s * (L / 4 - 0.06), 0.49, 0.05, fab)
+		box(g, L / 2 - 0.3, 0.5, 0.18, s * (L / 4 - 0.06), 0.78, -0.18, fab)
+		box(g, 0.38, 0.38, 0.12, s * (L / 2 - 0.42), 0.75, -0.08, cush)
+	_solid_rot(xf, x, z, L, 1.0, rot, y0, 1.0)
+
+
+func armchair(xf: Transform3D, x: float, z: float, rot: float, fab: Dictionary, y0 := 0.0) -> void:
+	var g := xf * Transform3D(Basis(Vector3.UP, rot), Vector3(x, y0, z))
+	box(g, 0.85, 0.42, 0.85, 0, 0.21, 0, fab)
+	box(g, 0.85, 0.85, 0.22, 0, 0.5, -0.4, fab)
+	for s in [-1.0, 1.0]:
+		box(g, 0.16, 0.6, 0.85, s * 0.42, 0.3, 0, fab)
+	_solid_rot(xf, x, z, 0.9, 0.9, rot, y0, 1.0)
+
+
+## Bookcase W wide facing local +z: carcass, shelves of books (one picture per bay), a cornice
+func bookshelf(xf: Transform3D, x: float, z: float, rot: float, W_: float, y0 := 0.0, h := 2.0) -> void:
+	var g := xf * Transform3D(Basis(Vector3.UP, rot), Vector3(x, y0, z))
+	box(g, W_, h, 0.35, 0, h / 2, 0, hm.wood_dark)
+	box(g, W_ + 0.06, 0.05, 0.4, 0, h + 0.025, 0.01, hm.wood_dark)
+	var bays := maxi(1, roundi(W_ / 0.9))
+	var bw := (W_ - 0.08) / bays
+	for k in bays:
+		var bx_ := -W_ / 2 + 0.04 + (k + 0.5) * bw
+		picture(g * Transform3D(Basis(), Vector3(bx_, h / 2, 0.178)), bw - 0.04, h - 0.15, hm.books)
+	_solid_rot(xf, x, z, W_, 0.4, rot, y0, h)
+
+
+func coffee_table(xf: Transform3D, x: float, z: float, ww: float, dd: float, y0 := 0.0) -> void:
+	box(xf, ww, 0.05, dd, x, y0 + 0.43, z, hm.wood_mid)
+	legs(xf, x, z, ww, dd, 0.41, hm.wood_mid, y0)
+	box(xf, ww - 0.1, 0.02, dd - 0.1, x, y0 + 0.12, z, hm.wood_mid)
+	box(xf, 0.22, 0.05, 0.3, x + 0.1, y0 + 0.48, z - 0.2, fabric("#8a3b2a"))
+	box(xf, 0.2, 0.04, 0.28, x + 0.1, y0 + 0.525, z - 0.2, fabric("#2f4b6b"))
+	solid(xf, x, z, ww, dd, y0, 0.5)
+
+
+func floor_lamp(xf: Transform3D, x: float, z: float, y0 := 0.0) -> void:
+	box(xf, 0.3, 0.03, 0.3, x, y0 + 0.015, z, hm.black)
+	box(xf, 0.035, 1.5, 0.035, x, y0 + 0.75, z, hm.black)
+	prim(xf, _cyl(0.18, 0.26, 0.32, 16, true), hm.shade, Vector3(x, y0 + 1.6, z))
 
 
 func _living_room(xf: Transform3D, fab: Dictionary, n: int) -> void:
 	rug(xf, -5.0, 0.045, 2.6, 2.4, 3.2, n)
-	# Sofa with seat and back cushions
-	box(xf, 0.95, 0.42, 2.4, -7.25, 0.21, 2.6, fab)
-	box(xf, 0.25, 0.85, 2.4, -7.6, 0.5, 2.6, fab)
-	for s in [-1.0, 1.0]:
-		box(xf, 0.95, 0.62, 0.22, -7.25, 0.31, 2.6 + s * 1.31, fab)
-		box(xf, 0.75, 0.14, 1.12, -7.2, 0.49, 2.6 + s * 0.58, fab)
-		box(xf, 0.18, 0.5, 1.05, -7.38, 0.78, 2.6 + s * 0.58, fab)
-		box(xf, 0.12, 0.38, 0.38, -7.28, 0.75, 2.6 + s * 1.0, fabric("#d9c9a6"))
-	solid(xf, -7.3, 2.6, 1.1, 2.8)
+	# Sofa against the side wall, facing the TV
+	sofa(xf, -7.25, 2.6, PI / 2, 2.6, fab)
 	painting(xf, -IX + 0.01, 1.85, 2.6, PI / 2, 1.4, 0.95, n)
 	# Coffee table with books and a mug
 	box(xf, 0.7, 0.05, 1.2, -5.6, 0.43, 2.6, hm.wood_mid)
@@ -796,32 +962,26 @@ func _living_room(xf: Transform3D, fab: Dictionary, n: int) -> void:
 	box(xf, 0.25, 0.05, 0.3, -3.0, 0.1, 2.1, hm.black)
 	solid(xf, -3.0, 2.6, 0.5, 1.8)
 	# Armchair
-	box(xf, 0.85, 0.42, 0.85, -5.0, 0.21, 5.7, fab)
-	box(xf, 0.85, 0.85, 0.22, -5.0, 0.5, 6.1, fab)
-	for s in [-1.0, 1.0]:
-		box(xf, 0.16, 0.6, 0.85, -5.0 + s * 0.42, 0.3, 5.7, fab)
-	solid(xf, -5.0, 5.75, 0.9, 0.9)
+	armchair(xf, -5.0, 5.7, PI, fab)
 	# Floor lamp
 	box(xf, 0.3, 0.03, 0.3, -7.3, 0.015, 5.9, hm.black)
 	box(xf, 0.035, 1.5, 0.035, -7.3, 0.75, 5.9, hm.black)
 	prim(xf, _cyl(0.18, 0.26, 0.32, 16, true), hm.shade, Vector3(-7.3, 1.6, 5.9))
-	# Dining table and chairs, a bowl of fruit, pendant above
-	box(xf, 1.8, 0.05, 1.0, 4.2, 0.75, 3.6, hm.wood_mid)
-	legs(xf, 4.2, 3.6, 1.8, 1.0, 0.73, hm.wood_mid)
-	solid(xf, 4.2, 3.6, 1.8, 1.0)
-	for c in [[3.6, 2.75, 1.0], [4.8, 2.75, 1.0], [3.6, 4.45, -1.0], [4.8, 4.45, -1.0]]:
-		box(xf, 0.45, 0.05, 0.45, c[0], 0.45, c[1], hm.wood_dark)
-		legs(xf, c[0], c[1], 0.45, 0.45, 0.43, hm.wood_dark)
-		box(xf, 0.45, 0.5, 0.05, c[0], 0.72, c[1] - c[2] * 0.2, hm.wood_dark)
-	prim(xf, _sph(0.18, 16, 8, true), hm.porcelain, Vector3(4.2, 0.95, 3.6), Basis.from_scale(Vector3(1, -1, 1)))
-	for f in [[0.0, 0.0, "#d9442b"], [0.07, 0.05, "#e3b23c"], [-0.06, 0.04, "#7aa83a"]]:
-		prim(xf, _sph(0.05, 10, 8), fabric(f[2]), Vector3(4.2 + f[0], 0.84, 3.6 + f[1]))
-	box(xf, 0.012, 1.1, 0.012, 4.2, SLAB0 - 0.55, 3.6, hm.black)
-	prim(xf, _cyl(0.0, 0.25, 0.22, 20, true), hm.dark_steel, Vector3(4.2, SLAB0 - 1.15, 3.6))
-	# Bookshelf with books on every shelf
-	box(xf, 0.35, 2.0, 1.4, 7.55, 1.0, 5.4, hm.wood_dark)
-	picture(xf * Transform3D(Basis(Vector3.UP, -PI / 2), Vector3(7.37, 1.0, 5.4)), 1.3, 1.85, hm.books)
-	solid(xf, 7.55, 5.4, 0.4, 1.4)
+	if lay.get("g_back", "guest") == "diner":
+		_library_lounge(xf, fab, n)
+	else:
+		_dining(xf, 4.2, 3.6)
+		# Bookshelf with books on every shelf
+		bookshelf(xf, 7.55, 5.4, -PI / 2, 1.4)
+	if lay.get("g_front", "open") == "walled":
+		# coat hooks and a shoe bench in the hall, against the living-room wall
+		box(xf, 0.35, 0.45, 0.9, -0.62, 0.225, 5.6, hm.wood_light)
+		box(xf, 0.04, 0.06, 0.9, -0.82, 1.7, 5.6, hm.wood_dark)
+		box(xf, 0.12, 0.7, 0.25, -0.76, 1.35, 5.4, fabric("#3d4a5c"))
+		solid(xf, -0.62, 5.6, 0.4, 0.9)
+		plant(xf, 1.7, 0.04, 6.2)
+		painting(xf, -2.2, 1.9, IZ - 0.01, PI, 0.8, 0.6, n + 2)
+		return
 	plant(xf, 1.7, 0.04, 6.2)
 	painting(xf, -2.2, 1.9, IZ - 0.01, PI, 0.8, 0.6, n + 2)
 	# Coat hooks and a shoe bench by the front door
@@ -829,6 +989,35 @@ func _living_room(xf: Transform3D, fab: Dictionary, n: int) -> void:
 	box(xf, 0.9, 0.06, 0.04, -1.4, 1.7, 6.78, hm.wood_dark)
 	box(xf, 0.25, 0.7, 0.12, -1.65, 1.35, 6.7, fabric("#3d4a5c"))
 	solid(xf, -1.4, 6.55, 0.9, 0.4)
+
+
+## Dining table for four with a bowl of fruit and a pendant lamp, centred at (x, z)
+func _dining(xf: Transform3D, x: float, z: float) -> void:
+	box(xf, 1.8, 0.05, 1.0, x, 0.75, z, hm.wood_mid)
+	legs(xf, x, z, 1.8, 1.0, 0.73, hm.wood_mid)
+	solid(xf, x, z, 1.8, 1.0)
+	for c in [[-0.6, -0.85, 1.0], [0.6, -0.85, 1.0], [-0.6, 0.85, -1.0], [0.6, 0.85, -1.0]]:
+		box(xf, 0.45, 0.05, 0.45, x + c[0], 0.45, z + c[1], hm.wood_dark)
+		legs(xf, x + c[0], z + c[1], 0.45, 0.45, 0.43, hm.wood_dark)
+		box(xf, 0.45, 0.5, 0.05, x + c[0], 0.72, z + c[1] - c[2] * 0.2, hm.wood_dark)
+	prim(xf, _sph(0.18, 16, 8, true), hm.porcelain, Vector3(x, 0.95, z), Basis.from_scale(Vector3(1, -1, 1)))
+	for f in [[0.0, 0.0, "#d9442b"], [0.07, 0.05, "#e3b23c"], [-0.06, 0.04, "#7aa83a"]]:
+		prim(xf, _sph(0.05, 10, 8), fabric(f[2]), Vector3(x + f[0], 0.84, z + f[1]))
+	box(xf, 0.012, 1.1, 0.012, x, SLAB0 - 0.55, z, hm.black)
+	prim(xf, _cyl(0.0, 0.25, 0.22, 20, true), hm.dark_steel, Vector3(x, SLAB0 - 1.15, z))
+
+
+## Front right as a library lounge (open-plan houses eat in the kitchen-diner): a wall of books, a sofa with its
+## back to the stairs, a coffee table, an armchair and a reading lamp
+func _library_lounge(xf: Transform3D, fab: Dictionary, n: int) -> void:
+	bookshelf(xf, 7.6, 5.6, -PI / 2, 1.4)
+	for xc in [2.6, 6.65]:   # either side of the front window
+		bookshelf(xf, xc, IZ - 0.2, PI, 1.4)
+	sofa(xf, 4.3, 1.45, 0.0, 2.4, fab)
+	coffee_table(xf, 4.3, 2.75, 1.2, 0.7)
+	armchair(xf, 6.4, 4.4, -PI / 2, fab)
+	floor_lamp(xf, 6.6, 5.9)
+	rug(xf, 4.6, 0.045, 3.2, 3.0, 2.4, n + 4)
 
 
 func _kitchen(xf: Transform3D) -> void:
@@ -936,7 +1125,7 @@ func _kitchen(xf: Transform3D) -> void:
 	box(xf, 0.09, 0.01, 0.01, -4.16, 2.3, -1.11, hm.black)
 
 
-func _upstairs(xf: Transform3D, duvet: Dictionary, duvet2: Dictionary, n: int) -> void:
+func _upstairs(xf: Transform3D, duvet: Dictionary, duvet2: Dictionary, n: int, fab: Dictionary) -> void:
 	var y := UP
 	var S := func(x: float, z: float, ww: float, dd: float) -> void: solid(xf, x, z, ww, dd, y)
 	# Hall runner and a painting
@@ -984,12 +1173,19 @@ func _upstairs(xf: Transform3D, duvet: Dictionary, duvet2: Dictionary, n: int) -
 	box(xf, 0.35, 2.0, 1.2, 7.6, y + 1.0, 6.0, hm.wood_dark)
 	picture(xf * Transform3D(Basis(Vector3.UP, -PI / 2), Vector3(7.42, y + 1.0, 6.0)), 1.1, 1.85, hm.books)
 	S.call(7.6, 6.0, 0.4, 1.2)
-	var chair := fabric("#6e7f63")
-	box(xf, 0.8, 0.42, 0.8, 6.8, y + 0.21, 2.8, chair)
-	box(xf, 0.8, 0.8, 0.2, 6.8, y + 0.5, 2.5, chair)
-	S.call(6.8, 2.75, 0.85, 0.85)
+	if lay.up_front == "split":
+		var chair := fabric("#6e7f63")
+		box(xf, 0.8, 0.42, 0.8, 6.8, y + 0.21, 2.8, chair)
+		box(xf, 0.8, 0.8, 0.2, 6.8, y + 0.5, 2.5, chair)
+		S.call(6.8, 2.75, 0.85, 0.85)
+		painting(xf, 1.0 + 0.07, y + 1.6, 4.4, PI / 2, 0.9, 0.65, n + 4)
+	else:   # one master suite: a sitting area with a sofa under the side window and books along the hall wall
+		sofa(xf, 7.25, 3.9, -PI / 2, 2.0, fab, y)
+		coffee_table(xf, 6.05, 3.9, 0.6, 1.0, y)
+		for xc in [4.3, 5.75]:
+			bookshelf(xf, xc, 2.0 + 0.06 + 0.2, 0.0, 1.4, y)
+		floor_lamp(xf, 7.3, 2.55, y)
 	rug(xf, 5.0, y + 0.005, 4.4, 2.4, 2.0, n)
-	painting(xf, 1.0 + 0.07, y + 1.6, 4.4, PI / 2, 0.9, 0.65, n + 4)
 	# ---- Bathroom (back left): tiles, bath, toilet, vanity with mirror ----
 	var bx0 := -IX
 	var bx1 := -2.56
@@ -1017,24 +1213,55 @@ func _upstairs(xf: Transform3D, duvet: Dictionary, duvet2: Dictionary, n: int) -
 	box(xf, 0.03, 0.03, 0.7, -IX + 0.08, y + 1.15, -5.3, hm.steel)
 	box(xf, 0.05, 0.6, 0.55, -IX + 0.1, y + 0.85, -5.3, fabric("#f2efe8"))
 	rug(xf, -6.9, y + 0.015, -5.6, 1.0, 0.6, n + 1)
-	# ---- Second bedroom (back right) ----
-	box(xf, 1.0, 0.3, 2.05, 6.95, y + 0.15, -5.75, hm.wood_light)
-	box(xf, 0.92, 0.2, 1.95, 6.95, y + 0.4, -5.75, hm.linen)
-	box(xf, 0.96, 0.08, 1.4, 6.95, y + 0.53, -5.3, duvet2)
-	box(xf, 0.6, 0.12, 0.35, 6.95, y + 0.56, -6.5, hm.linen)
-	box(xf, 1.0, 0.8, 0.06, 6.95, y + 0.4, -IZ + 0.03, hm.wood_light)
-	S.call(6.95, -5.75, 1.05, 2.1)
-	box(xf, 1.2, 0.05, 0.6, 3.5, y + 0.74, -6.45, hm.wood_light)
-	legs(xf, 3.5, -6.45, 1.2, 0.6, 0.72, hm.wood_light, y)
-	box(xf, 0.4, 0.05, 0.4, 3.5, y + 0.45, -5.85, hm.wood_mid)
-	legs(xf, 3.5, -5.85, 0.4, 0.4, 0.43, hm.wood_mid, y)
-	box(xf, 0.4, 0.45, 0.04, 3.5, y + 0.72, -5.65, hm.wood_mid)
-	S.call(3.5, -6.3, 1.2, 0.9)
-	prim(xf, _sph(0.42, 16, 10), fabric("#c9473d"), Vector3(0.8, y + 0.25, -3.2), Basis.from_scale(Vector3(1, 0.6, 1)))
-	box(xf, 0.6, 0.45, 0.4, -1.5, y + 0.225, -6.5, fabric("#3f7cac"))
-	box(xf, 1.2, 2.0, 0.55, 0.3, y + 1.0, -1.42, hm.wood_light)
-	S.call(0.3, -1.42, 1.2, 0.55)
-	rug(xf, 3.0, y + 0.005, -3.8, 2.0, 2.0, n + 2)
+	# ---- Back right: a bedroom, a library, or a bedroom and a nursery ----
+	var bedroom := func() -> void:
+		box(xf, 1.0, 0.3, 2.05, 6.95, y + 0.15, -5.75, hm.wood_light)
+		box(xf, 0.92, 0.2, 1.95, 6.95, y + 0.4, -5.75, hm.linen)
+		box(xf, 0.96, 0.08, 1.4, 6.95, y + 0.53, -5.3, duvet2)
+		box(xf, 0.6, 0.12, 0.35, 6.95, y + 0.56, -6.5, hm.linen)
+		box(xf, 1.0, 0.8, 0.06, 6.95, y + 0.4, -IZ + 0.03, hm.wood_light)
+		S.call(6.95, -5.75, 1.05, 2.1)
+	var desk := func() -> void:
+		box(xf, 1.2, 0.05, 0.6, 3.5, y + 0.74, -6.45, hm.wood_light)
+		legs(xf, 3.5, -6.45, 1.2, 0.6, 0.72, hm.wood_light, y)
+		box(xf, 0.4, 0.05, 0.4, 3.5, y + 0.45, -5.85, hm.wood_mid)
+		legs(xf, 3.5, -5.85, 0.4, 0.4, 0.43, hm.wood_mid, y)
+		box(xf, 0.4, 0.45, 0.04, 3.5, y + 0.72, -5.65, hm.wood_mid)
+		S.call(3.5, -6.3, 1.2, 0.9)
+	var play := func(bx_: float, tx: float) -> void:   # beanbag and toy box
+		prim(xf, _sph(0.42, 16, 10), fabric("#c9473d"), Vector3(bx_, y + 0.25, -3.2), Basis.from_scale(Vector3(1, 0.6, 1)))
+		box(xf, 0.6, 0.45, 0.4, tx, y + 0.225, -6.5, fabric("#3f7cac"))
+	var wardrobe := func() -> void:
+		box(xf, 1.2, 2.0, 0.55, 0.3, y + 1.0, -1.42, hm.wood_light)
+		S.call(0.3, -1.42, 1.2, 0.55)
+	match lay.up_back:
+		"bedroom":
+			bedroom.call()
+			desk.call()
+			play.call(0.8, -1.5)
+			wardrobe.call()
+			rug(xf, 3.0, y + 0.005, -3.8, 2.0, 2.0, n + 2)
+		"library":
+			desk.call()
+			wardrobe.call()
+			_library(xf, fab, n, y, [-1.0, 0.45, 5.25, 6.7], [-6.0, -2.3], false)
+		"nursery":
+			bedroom.call()
+			desk.call()
+			rug(xf, 5.2, y + 0.005, -3.8, 2.0, 2.0, n + 2)
+			# the nursery between the bathroom and the bedroom: a cot with bars, a beanbag, toys, a wardrobe
+			box(xf, 0.75, 0.06, 1.3, -1.6, y + 0.45, -5.6, hm.white)
+			box(xf, 0.68, 0.1, 1.22, -1.6, y + 0.52, -5.6, duvet)
+			for sx in [-1.0, 1.0]:
+				box(xf, 0.04, 0.95, 0.04, -1.6 + sx * 0.36, y + 0.475, -6.23, hm.white)
+				box(xf, 0.04, 0.95, 0.04, -1.6 + sx * 0.36, y + 0.475, -4.97, hm.white)
+				box(xf, 0.03, 0.04, 1.3, -1.6 + sx * 0.36, y + 0.93, -5.6, hm.white)
+				for k in 7:
+					box(xf, 0.02, 0.5, 0.02, -1.6 + sx * 0.36, y + 0.7, -6.05 + k * 0.15, hm.white)
+			S.call(-1.6, -5.6, 0.8, 1.35)
+			play.call(0.9, 0.9)
+			wardrobe.call()
+			rug(xf, -0.2, y + 0.005, -3.8, 1.8, 1.4, n + 4)
 	painting(xf, -2.5 + 0.07, y + 1.6, -4.0, PI / 2, 0.7, 0.5, n + 5)
 
 
