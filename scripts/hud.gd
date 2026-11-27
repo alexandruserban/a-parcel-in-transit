@@ -247,24 +247,9 @@ func _build_menu(root: Control) -> void:
 	task.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	task.custom_minimum_size = Vector2(640, 0)
 	v.add_child(task)
-	var mrow := HBoxContainer.new()
-	mrow.add_theme_constant_override("separation", 12)
-	v.add_child(mrow)
-	mrow.add_child(_label("Music", 16))
-	var slider := HSlider.new()
-	slider.min_value = 0
-	slider.max_value = 100
-	slider.step = 1
-	slider.custom_minimum_size = Vector2(300, 24)
-	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
-	mrow.add_child(slider)
-	music_value = _label("40%", 16)
-	mrow.add_child(music_value)
-	slider.value = round(game.sfx.music_volume * 100)
-	music_value.text = "%d%%" % int(slider.value)
-	slider.value_changed.connect(func(val: float) -> void:
-		game.sfx.set_music_volume(val / 100.0)
-		music_value.text = "%d%%" % int(val))
+	# volume sliders: the music, and every other sound (footsteps, parcels, bells, truck, birds, wind)
+	music_value = _volume_row(v, "Music", game.sfx.music_volume, func(f: float) -> void: game.sfx.set_music_volume(f))
+	_volume_row(v, "Effects", game.sfx.effects_volume, func(f: float) -> void: game.sfx.set_effects_volume(f))
 	# your progress (filled in by set_stats when the menu opens)
 	stats_title = _label("YOUR PROGRESS", 15, Color("#94a3b8"))
 	stats_title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
@@ -342,6 +327,32 @@ func _process(delta: float) -> void:
 
 func set_score(v: int) -> void:
 	score_label.text = "Score: %d" % v
+
+
+## A labelled 0-100 % slider row; returns the value label
+func _volume_row(parent: Control, title: String, value: float, on_change: Callable) -> Label:
+	var row := HBoxContainer.new()
+	row.add_theme_constant_override("separation", 12)
+	parent.add_child(row)
+	var name_l := _label(title, 16)
+	name_l.custom_minimum_size = Vector2(70, 0)
+	row.add_child(name_l)
+	var slider := HSlider.new()
+	slider.min_value = 0
+	slider.max_value = 100
+	slider.step = 1
+	slider.custom_minimum_size = Vector2(300, 24)
+	slider.size_flags_horizontal = Control.SIZE_EXPAND_FILL
+	row.add_child(slider)
+	var val_l := _label("", 16)
+	val_l.custom_minimum_size = Vector2(48, 0)
+	row.add_child(val_l)
+	slider.value = round(value * 100)
+	val_l.text = "%d%%" % int(slider.value)
+	slider.value_changed.connect(func(val: float) -> void:
+		on_change.call(val / 100.0)
+		val_l.text = "%d%%" % int(val))
+	return val_l
 
 
 func set_clock(text: String) -> void:

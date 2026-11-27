@@ -9,6 +9,8 @@ const SETTINGS := "user://settings.cfg"
 
 var enabled := true
 var music_volume := 0.4
+var effects_volume := 1.0   # everything but the music, through the "Effects" bus
+const FX_BUS := "Effects"
 var night := false
 var streams := {}
 var music: AudioStreamPlayer
@@ -33,8 +35,15 @@ func _ready() -> void:
 	var cfg := ConfigFile.new()
 	if cfg.load(SETTINGS) == OK:
 		music_volume = clampf(cfg.get_value("audio", "music_volume", 0.4), 0.0, 1.0)
+		effects_volume = clampf(cfg.get_value("audio", "effects_volume", 1.0), 0.0, 1.0)
+	if AudioServer.get_bus_index(FX_BUS) < 0:
+		AudioServer.add_bus()
+		AudioServer.set_bus_name(AudioServer.bus_count - 1, FX_BUS)
+		AudioServer.set_bus_send(AudioServer.bus_count - 1, "Master")
+	_apply_effects()
 	for i in 12:
 		var p := AudioStreamPlayer.new()
+		p.bus = FX_BUS
 		add_child(p)
 		_pool.append(p)
 	_build()
@@ -48,11 +57,13 @@ func _ready() -> void:
 	ambient = AudioStreamPlayer.new()
 	ambient.stream = streams.wind
 	ambient.volume_db = -20.0
+	ambient.bus = FX_BUS
 	add_child(ambient)
 	WorkerThreadPool.add_task(_build_bell)
 	_load_steps()
 	engine = AudioStreamPlayer.new()
 	engine.stream = streams.engine
+	engine.bus = FX_BUS
 	add_child(engine)
 	_apply_music()
 
@@ -70,6 +81,24 @@ func set_music_volume(v: float) -> void:
 	cfg.set_value("audio", "music_volume", music_volume)
 	cfg.save(SETTINGS)
 	_apply_music()
+
+
+func set_effects_volume(v: float) -> void:
+	effects_volume = clampf(v, 0.0, 1.0)
+	var cfg := ConfigFile.new()
+	cfg.load(SETTINGS)
+	cfg.set_value("audio", "effects_volume", effects_volume)
+	cfg.save(SETTINGS)
+	_apply_effects()
+
+
+## The Effects bus follows the slider on the same curve as the music (squared, so the low end is usable)
+func _apply_effects() -> void:
+	var i := AudioServer.get_bus_index(FX_BUS)
+	if i < 0:
+		return
+	AudioServer.set_bus_mute(i, effects_volume <= 0.0)
+	AudioServer.set_bus_volume_db(i, linear_to_db(maxf(effects_volume * effects_volume, 0.0001)))
 
 
 func _apply_music() -> void:
@@ -136,6 +165,7 @@ func _load_steps() -> void:
 			step_streams[key] = s
 	for i in 4:
 		var p := AudioStreamPlayer.new()
+		p.bus = FX_BUS
 		add_child(p)
 		step_players.append(p)
 
@@ -188,6 +218,7 @@ func wind_gust(duration: float) -> void:
 		return
 	if gust_player == null:
 		gust_player = AudioStreamPlayer.new()
+		gust_player.bus = FX_BUS
 		gust_player.stream = streams.wind
 		add_child(gust_player)
 	_gust_t = 0.0
@@ -271,6 +302,7 @@ func hang_bells(parent: Node, at: Vector3) -> void:
 		p.max_distance = 1200.0
 		p.max_db = 8.0
 		p.attenuation_model = AudioStreamPlayer3D.ATTENUATION_INVERSE_DISTANCE
+		p.bus = FX_BUS
 		p.panning_strength = 0.6
 		parent.add_child(p)
 		bell_players.append(p)

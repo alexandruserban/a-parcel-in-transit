@@ -678,6 +678,22 @@ func _smoke_test() -> void:
 		if pl.playing and (pl.stream == sfx.streams.step_hard or pl.stream == sfx.step_streams.get("stone")):
 			playing += 1
 	print("SMOKE: recorded footsteps loaded: %s" % str(sfx.step_streams.keys()))
+	# every sound but the music runs through the Effects bus, which the Effects slider turns down
+	var fx_bus := AudioServer.get_bus_index(sfx.FX_BUS)
+	var off_bus := 0
+	for pl in sfx._pool + sfx.step_players + sfx.bell_players + [sfx.engine, sfx.ambient]:
+		if pl.bus != sfx.FX_BUS:
+			off_bus += 1
+	var keep: float = sfx.effects_volume
+	sfx._apply_effects()
+	var db_full := AudioServer.get_bus_volume_db(fx_bus)
+	sfx.effects_volume = 0.5
+	sfx._apply_effects()
+	var db_half := AudioServer.get_bus_volume_db(fx_bus)
+	sfx.effects_volume = keep
+	sfx._apply_effects()
+	print("SMOKE: effects bus %d, players off it %d, music on %s, bus at 100%% %.1f dB, at 50%% %.1f dB" % [fx_bus, off_bus, sfx.music.bus, db_full, db_half])
+	assert(fx_bus > 0 and off_bus == 0 and sfx.music.bus == "Master")
 	print("SMOKE: footstep after the bells struck: %s" % ("plays" if playing > 0 else "SILENT"))
 	assert(playing > 0)
 	print("SMOKE: parcels %d -> %d, stored %d, score %d, backpack %d, player y %.2f" % [before, parcels.records.size(), parcels.stored_total(), score, backpack.size(), player.global_position.y])
