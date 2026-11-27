@@ -58,6 +58,7 @@ func _ready() -> void:
 	rear_item = {"pos": Vector3.ZERO, "prompt": "", "type": "truck", "call": load_or_unload}
 	world.interactables.append(door_item)
 	world.interactables.append(rear_item)
+	_update_ride(1.0)
 	_sync()
 
 
@@ -756,6 +757,7 @@ func _physics_process(dt: float) -> void:
 			if driving and view == "cab":
 				P.yaw -= dh
 	wheel_spin -= speed * dt / 0.5
+	_update_ride(dt)
 	_sync()
 
 	# lights
@@ -803,8 +805,31 @@ func _physics_process(dt: float) -> void:
 		_update_camera(dt)
 
 
+## Ride height and tilt from the ground under the four wheels (kerbs, pavements), eased so climbing a kerb
+## lifts the truck smoothly instead of the wheels sinking into the pavement
+var ride_y := 0.0
+var ride_pitch := 0.0
+var ride_roll := 0.0
+func _update_ride(dt: float) -> void:
+	var b0 := Basis(Vector3.UP, -heading)
+	var g := func(lx: float, lz: float) -> float:
+		var p: Vector3 = b0 * Vector3(lx, 0, lz)
+		return world.ground_y_at(pos.x + p.x, pos.y + p.z)
+	var fl: float = g.call(2.55, -1.05)
+	var fr: float = g.call(2.55, 1.05)
+	var rl: float = g.call(-2.3, -1.1)
+	var rr: float = g.call(-2.3, 1.1)
+	var ty := (fl + fr + rl + rr) / 4.0
+	var tp := atan(((fl + fr) - (rl + rr)) / 2.0 / 4.85)
+	var tr := -atan(((fr + rr) - (fl + rl)) / 2.0 / 2.1)
+	var k := minf(1.0, dt * 9.0)
+	ride_y += (ty - ride_y) * k
+	ride_pitch += (tp - ride_pitch) * k
+	ride_roll += (tr - ride_roll) * k
+
+
 func _sync() -> void:
-	transform = Transform3D(Basis(Vector3.UP, -heading), Vector3(pos.x, 0, pos.y))
+	transform = Transform3D(Basis(Vector3.UP, -heading) * Basis(Vector3.BACK, ride_pitch) * Basis(Vector3.RIGHT, ride_roll), Vector3(pos.x, ride_y, pos.y))
 	for w in wheels:
 		w.pivot.rotation.y = steer if w.steerable else 0.0
 		w.spin.rotation.z = wheel_spin

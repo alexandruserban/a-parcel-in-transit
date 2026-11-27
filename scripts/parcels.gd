@@ -84,7 +84,10 @@ func build() -> void:
 						break
 				if not ok:
 					continue
-				var g0: float = world.ground_y_at(x, z)
+				var adj := _off_edge(x, z, foot / 2)   # not hanging over a kerb edge
+				x = adj.x
+				z = adj.z
+				var g0: float = adj.y
 				y = g0 + S.h / 2
 				columns.append({"x": x, "z": z, "top": g0 + S.h, "foot": foot})
 			specs[size].append([x, y, z, rng.randf() * PI])
@@ -250,6 +253,11 @@ func update_gust(gust_t: float, gust: float, dt: float) -> void:
 					var S0: Dictionary = SIZES[rec.size]
 					rec.hx = maxf(S0.w, S0.d) * 0.45
 					rec.hz = rec.hx
+					var r0 := _rest_y(rec, to.x, to.z)
+					if _on_ground(rec, to.x, to.z, r0):   # not across a kerb edge
+						var e := _off_edge(to.x, to.z, maxf(S0.w, S0.d) / 2)
+						to = Vector3(e.x, to.y, e.z)
+						f.to = to
 					rec.pos = Vector3(to.x, rec.pos.y, to.z)
 					f.rest_y = _rest_y(rec, to.x, to.z)
 					rec.rest_y = f.rest_y   # others landing here now stack on it
@@ -579,8 +587,8 @@ func kick_from(at: Vector3, r: float, h: float, vel: Vector3, power := 1.0) -> i
 			away = flat if spd > 0.1 else Vector3(1, 0, 0)
 		away = away.normalized()
 		# mostly away from the body, partly along its motion; a hop that grows with speed
-		var v := (away * (1.6 + spd * 0.55) + flat * 0.45) * power
-		v.y = (1.8 + spd * 0.22) * sqrt(power)
+		var v := (away * (0.8 + spd * 0.25) + flat * 0.22) * power
+		v.y = (0.9 + spd * 0.1) * sqrt(power)
 		_start_kick(rec, v)
 		n += 1
 	if n > 0 and _kick_sound_t <= 0.0:
@@ -606,6 +614,39 @@ func game_sound(n: int, power: float) -> void:
 	var g = get_parent()
 	if g != null and "sfx" in g and g.sfx != null:
 		g.sfx.play("land", -9.0 + minf(n, 4) * 1.5 + (2.0 if power > 1.5 else 0.0), rng.randf_range(1.1, 1.35))
+
+
+## A parcel standing on the ground across a step (pavement edge to the street or the lawn) slides off it and
+## comes down fully on the lower side, instead of hanging half in the air or half inside the kerb.
+## Returns the new (x, ground height, z).
+func _off_edge(x: float, z: float, half: float) -> Vector3:
+	var e := half - 0.04
+	var offs := [Vector2.ZERO, Vector2(e, e), Vector2(-e, e), Vector2(e, -e), Vector2(-e, -e)]
+	for step in 14:
+		var hs: Array = []
+		var lo := INF
+		var hi := -INF
+		for o in offs:
+			var g: float = world.ground_y_at(x + o.x, z + o.y)
+			hs.append(g)
+			lo = minf(lo, g)
+			hi = maxf(hi, g)
+		if hi - lo < 0.05:
+			return Vector3(x, lo, z)
+		var dir := Vector2.ZERO
+		for i in offs.size():
+			dir += offs[i] * (1.0 if hs[i] <= lo + 0.02 else -1.0)
+		if dir.length() < 0.001:
+			dir = Vector2(1, 0)
+		dir = dir.normalized()
+		x += dir.x * 0.1
+		z += dir.y * 0.1
+	return Vector3(x, world.ground_y_at(x, z), z)
+
+
+## Is a parcel at (x, z) resting on the bare ground (nothing under it but the street, pavement or lawn)?
+func _on_ground(rec: Dictionary, x: float, z: float, rest: float) -> bool:
+	return absf(rest - (world.ground_y_at(x, z) + SIZES[rec.size].h / 2 + 0.01)) < 0.02
 
 
 ## Move the knocked parcels: gravity, tumbling, a bounce or two, walls turn them back; then they settle upright
@@ -645,7 +686,12 @@ func update_kicks(dt: float) -> void:
 				v.z *= 0.6
 				k.spin *= 0.5
 				np.y = rest
-			else:            # settle, upright, keeping the yaw it tumbled to
+			else:            # settle, upright, keeping the yaw it tumbled to (off a kerb edge if it straddles one)
+				if _on_ground(rec, np.x, np.z, rest):
+					var e := _off_edge(np.x, np.z, maxf(SIZES[rec.size].w, SIZES[rec.size].d) / 2)
+					np.x = e.x
+					np.z = e.z
+					rest = _rest_y(rec, np.x, np.z)
 				var fwd: Vector3 = k.basis * Vector3.FORWARD
 				rec.rot = atan2(-fwd.x, -fwd.z)
 				rec.pos = Vector3(np.x, rest, np.z)

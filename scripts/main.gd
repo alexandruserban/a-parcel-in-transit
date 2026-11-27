@@ -497,6 +497,8 @@ func load_game() -> bool:
 	var tr: Array = d.truck
 	truck.pos = Vector2(tr[0], tr[1])
 	truck.heading = tr[2]
+	truck._update_ride(1.0)   # straight to the ride height where it was parked
+	truck._sync()
 	truck.cargo.clear()
 	for s in tr[3]:
 		truck.cargo.append(String(s))
@@ -615,7 +617,7 @@ func _knock_parcels(delta: float) -> void:
 			var v: Vector3 = Vector3(f.x, 0, f.y) * truck.speed
 			for off in [2.6, 0.4, -1.8]:   # three circles down the length of the truck
 				var c: Vector2 = truck.pos + f * off
-				parcels.kick_from(Vector3(c.x, 0.0, c.y), 1.35, 3.0, v, clampf(1.0 + absf(truck.speed) * 0.12, 1.2, 2.6))
+				parcels.kick_from(Vector3(c.x, 0.0, c.y), 1.35, 3.0, v, clampf(1.0 + absf(truck.speed) * 0.06, 1.05, 1.8))
 	elif player.is_on_floor() and Vector2(player.velocity.x, player.velocity.z).length() > 0.5:
 		parcels.kick_from(player.global_position, 0.42, 1.6, player.velocity, 1.0)
 	parcels.update_kicks(delta)
@@ -979,8 +981,35 @@ func _kicks_test() -> void:
 	for r in parcels.records:
 		if not r.stored and not r.get("flying", false) and r.pos.y > parcels._rest_y(r, r.pos.x, r.pos.z, r.pos.y - parcels.SIZES[r.size].h / 2 + 0.02) + 0.05:
 			floating += 1
+	# no loose parcel resting on the ground across a kerb edge
+	var straddle := 0
+	for r in parcels.records:
+		if r.stored or r.get("flying", false):
+			continue
+		var hh: float = maxf(parcels.SIZES[r.size].w, parcels.SIZES[r.size].d) / 2 - 0.04
+		var gy: float = world.ground_y_at(r.pos.x, r.pos.z)
+		if absf(r.pos.y - parcels.SIZES[r.size].h / 2 - 0.01 - gy) > 0.03:
+			continue   # stacked on something
+		var lo := INF
+		var hi := -INF
+		for o in [Vector2(hh, hh), Vector2(-hh, hh), Vector2(hh, -hh), Vector2(-hh, -hh)]:
+			var g: float = world.ground_y_at(r.pos.x + o.x, r.pos.z + o.y)
+			lo = minf(lo, g)
+			hi = maxf(hi, g)
+		if hi - lo > 0.05:
+			straddle += 1
+	# the truck half up on the pavement of the Ulmenstraße: no wheel sinks into it
+	truck.pos = Vector2(5.4, 60.0)
+	truck.heading = PI / 2
+	for i in 60:
+		await get_tree().physics_frame
+	var sink := 0.0
+	for wh in truck.wheels:
+		var c: Vector3 = wh.pivot.global_position
+		sink = maxf(sink, world.ground_y_at(c.x, c.z) - (c.y - 0.5))
+	print("KICKS: parcels hanging across a kerb edge: %d; truck half on the pavement: ride %.2f m, roll %.1f deg, deepest wheel sinks %.2f m" % [straddle, truck.ride_y, rad_to_deg(truck.ride_roll), sink])
 	print("KICKS: truck plough: up to %d parcels tumbling at once; avg %d us, worst %d us per frame; %d still moving after, %d left floating" % [tmoving, tt / maxi(tf, 1), tw, still, floating])
-	get_tree().quit(0 if moved > 0 and still == 0 and floating == 0 else 1)
+	get_tree().quit(0 if moved > 0 and still == 0 and floating == 0 and straddle == 0 and sink < 0.08 else 1)
 
 
 ## Walk from the Ulmenstraße onto its pavement at walking speed, head-on and at a slant, and off again
@@ -1192,6 +1221,7 @@ func _screenshot_mode() -> void:
 	_shots.append([Vector3(-30.0, 3.0, 66.0), "cam", Vector3(-45.0, 16.0, 55.0), 15.0, "church_back", 65.0])
 	_shots.append([Vector3(-27.6, 2.6, 6.2), "cam", Vector3(-27.4, 2.6, 2.5), 15.0, "truck_cab_side", 60.0])
 	_shots.append([Vector3(-31.5, 2.2, 0.0), "cam", Vector3(-27.0, 1.5, 2.5), 15.0, "truck_front_round", 55.0])
+	_shots.append([Vector3(1.0, 1.4, 68.0), "cam", Vector3(5.4, 0.8, 60.0), 15.0, "truck_kerb", 60.0])
 	_shots.append([Vector3(-58.0, 6.0, 46.0), "cam", Vector3(-45.0, 16.0, 46.0), 15.0, "church_side", 65.0])
 	_shots.append([Vector3(-25.0, 30.0, 12.0), "cam", Vector3(-45.0, 44.0, 30.5), 15.0, "church_spire", 55.0])
 	_shots.append([Vector3(-45.0, 1.7, 75.0), "cam", Vector3(-45.0, 20.0, 50.0), 15.0, "church_under", 70.0])
@@ -1212,6 +1242,11 @@ func _screenshot_mode() -> void:
 	for s in _shots:
 		if only.size() > 0 and not (s[4] in only):
 			continue
+		if s[4] == "truck_kerb":   # park the truck half up on the Ulmenstraße pavement
+			truck.pos = Vector2(5.4, 60.0)
+			truck.heading = PI / 2
+			truck._update_ride(1.0)
+			truck._sync()
 		player.global_position = s[0]
 		sky.hour = s[3]
 		player.camera.fov = s[5] if s.size() > 5 else 75.0
