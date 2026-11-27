@@ -146,6 +146,8 @@ func _place(rec: Dictionary, x: float, y: float, z: float, rot: float, stored :=
 	rec.live = true
 	_mm[rec.size].set_instance_transform(rec.slot, Transform3D(Basis(Vector3.UP, rot), rec.pos))
 	records.append(rec)
+	if not _grid_dirty:
+		_grid_put(rec)
 
 
 func prompt_for(rec: Dictionary) -> String:
@@ -220,7 +222,7 @@ func _rest_y(rec: Dictionary, x: float, z: float, below := INF) -> float:
 	var S: Dictionary = SIZES[rec.size]
 	var hx: float = maxf(S.w, S.d) * 0.45
 	var top := _support_top(x, z, hx, hx, rec, below)
-	for sd in world.solids_near(x, z, hx):
+	for sd in _solids_at(x, z):
 		if sd.top < 1.2 and world.in_rect(sd.rect, x, z, hx - 0.05):
 			top = maxf(top, sd.top)
 	return top + S.h / 2 + 0.01
@@ -278,6 +280,7 @@ func update_gust(gust_t: float, gust: float, dt: float) -> void:
 				rec.hz = rec.hx
 				rec.flying = false
 				rec.erase("rest_y")
+				_grid_moved(rec)
 				_mm[rec.size].set_instance_transform(rec.slot, Transform3D(Basis(Vector3.UP, rec.rot), rec.pos))
 			done += 1
 			continue
@@ -324,15 +327,87 @@ func nearest(eye: Vector3, dir: Vector3, max_dist: float):
 ## Remove a parcel from the town (picked up); anything stacked on it settles down
 func take(rec: Dictionary) -> void:
 	records.erase(rec)
+	_grid_drop(rec)
 	rec.live = false
 	_mm[rec.size].set_instance_transform(rec.slot, HIDDEN)
 	_free[rec.size].append(rec.slot)
 	_settle(rec.pos.x, rec.pos.z, rec.hx, rec.hz, rec.pos.y)
 
 
+## The town's solids touching each 50 cm cell (grown by half a metre, the most a parcel reaches), looked up
+## once per cell: near a house the 16 m grid in world.gd holds hundreds of furniture colliders
+var _solid_cells := {}
+func _solids_at(x: float, z: float) -> Array:
+	var key := Vector2i(floori(x / 0.5), floori(z / 0.5))
+	var cell = _solid_cells.get(key)
+	if cell == null:
+		cell = []
+		var r := Rect2(key.x * 0.5 - 0.5, key.y * 0.5 - 0.5, 1.5, 1.5)
+		for sd in world.solids_near(key.x * 0.5 + 0.25, key.y * 0.5 + 0.25, 1.0):
+			if (sd.rect as Rect2).intersects(r):
+				cell.append(sd)
+		_solid_cells[key] = cell
+	return cell
+
+
+## Parcels by 2 m cell, so the knock and landing tests only look at their neighbours. Rebuilt lazily (at most
+## once a frame, and only after a parcel was placed, taken or came to rest somewhere new).
+var _grid := {}
+var _grid_dirty := true
+const GRID := 2.0
+
+func _grid_key(p: Vector3) -> Vector2i:
+	return Vector2i(floori(p.x / GRID), floori(p.z / GRID))
+
+
+func _grid_put(rec: Dictionary) -> void:
+	var key := _grid_key(rec.pos)
+	var cell: Array = _grid.get(key, [])
+	if cell.is_empty():
+		_grid[key] = cell
+	cell.append(rec)
+	rec.cell = key
+
+
+func _grid_drop(rec: Dictionary) -> void:
+	if rec.has("cell"):
+		var cell = _grid.get(rec.cell)
+		if cell != null:
+			(cell as Array).erase(rec)
+
+
+## A parcel came to rest somewhere new: move it to its new cell (no full rebuild)
+func _grid_moved(rec: Dictionary) -> void:
+	if _grid_dirty:
+		return
+	var key := _grid_key(rec.pos)
+	if rec.get("cell") != key:
+		_grid_drop(rec)
+		_grid_put(rec)
+
+
+func _nearby(x: float, z: float, r: float) -> Array:
+	if _grid_dirty:
+		_grid.clear()
+		for rec in records:
+			_grid_put(rec)
+		_grid_dirty = false
+	var out: Array = []
+	for cx in range(floori((x - r) / GRID), floori((x + r) / GRID) + 1):
+		for cz in range(floori((z - r) / GRID), floori((z + r) / GRID) + 1):
+			var cell = _grid.get(Vector2i(cx, cz))
+			if cell != null:
+				out.append_array(cell)
+	return out
+
+
 func _support_top(x: float, z: float, hx: float, hz: float, ignore, below := INF) -> float:
 	var top: float = world.ground_y_at(x, z)
-	for p in records:
+	var cand := _nearby(x, z, maxf(hx, hz) + 0.6)
+	for f in flights:   # parcels from a gust that touched down and are settling (their grid cell is still the old one)
+		if f.rec.has("rest_y"):
+			cand.append(f.rec)
+	for p in cand:
 		if p == ignore:
 			continue
 		var py: float = p.pos.y
@@ -471,6 +546,121 @@ func store(size: String) -> bool:
 	return true
 
 
+# ------------------------------------------------------------------------------------------------
+# Knocking parcels aside: walking or driving into a loose parcel shoves it away with a hop; it tumbles,
+# bounces off walls and the ground and settles, and whatever was stacked on it falls. Only the parcels in
+# motion are simulated (a handful at a time); the overlap test rejects far parcels with two subtractions.
+# ------------------------------------------------------------------------------------------------
+var kicked: Array = []          # [{rec, vel: Vector3, spin: Vector3, basis: Basis}]
+const KICK_GRAVITY := 18.0
+var _kick_sound_t := 0.0
+
+
+## Knock aside every loose parcel overlapping a body (a vertical cylinder of radius r and height h standing at
+## `at`) that moves with velocity `vel`; `power` scales the shove (1 walking, more for the truck). Returns how many.
+func kick_from(at: Vector3, r: float, h: float, vel: Vector3, power := 1.0) -> int:
+	var n := 0
+	var flat := Vector3(vel.x, 0, vel.z)
+	var spd := flat.length()
+	for rec in _nearby(at.x, at.z, r + 0.6):
+		if rec.stored or rec.get("flying", false):
+			continue
+		var p: Vector3 = rec.pos
+		var dx: float = p.x - at.x
+		var dz: float = p.z - at.z
+		var reach: float = r + rec.hx
+		if absf(dx) > reach or absf(dz) > reach:
+			continue
+		var bottom: float = p.y - SIZES[rec.size].h / 2
+		if bottom > at.y + h or p.y + SIZES[rec.size].h / 2 < at.y - 0.1:
+			continue
+		var away := Vector3(dx, 0, dz)
+		if away.length() < 0.05:
+			away = flat if spd > 0.1 else Vector3(1, 0, 0)
+		away = away.normalized()
+		# mostly away from the body, partly along its motion; a hop that grows with speed
+		var v := (away * (1.6 + spd * 0.55) + flat * 0.45) * power
+		v.y = (1.8 + spd * 0.22) * sqrt(power)
+		_start_kick(rec, v)
+		n += 1
+	if n > 0 and _kick_sound_t <= 0.0:
+		game_sound(n, power)
+		_kick_sound_t = 0.12
+	return n
+
+
+func _start_kick(rec: Dictionary, v: Vector3) -> void:
+	rec.flying = true
+	var old: Vector3 = rec.pos
+	kicked.append({"rec": rec, "vel": v, "spin": Vector3(rng.randf_range(-1, 1), rng.randf_range(-0.5, 0.5), rng.randf_range(-1, 1)) * (2.0 + v.length() * 0.8),
+		"basis": Basis(Vector3.UP, rec.rot)})
+	# parcels stacked on this one lose their footing and drop (with a nudge the same way)
+	for q in _nearby(old.x, old.z, 1.2):
+		if q == rec or q.stored or q.get("flying", false):
+			continue
+		if q.pos.y > old.y + 0.1 and absf(q.pos.x - old.x) < q.hx + rec.hx - 0.05 and absf(q.pos.z - old.z) < q.hz + rec.hz - 0.05:
+			_start_kick(q, Vector3(v.x * 0.35 + rng.randf_range(-0.4, 0.4), 0.3, v.z * 0.35 + rng.randf_range(-0.4, 0.4)))
+
+
+func game_sound(n: int, power: float) -> void:
+	var g = get_parent()
+	if g != null and "sfx" in g and g.sfx != null:
+		g.sfx.play("land", -9.0 + minf(n, 4) * 1.5 + (2.0 if power > 1.5 else 0.0), rng.randf_range(1.1, 1.35))
+
+
+## Move the knocked parcels: gravity, tumbling, a bounce or two, walls turn them back; then they settle upright
+func update_kicks(dt: float) -> void:
+	_kick_sound_t -= dt
+	if kicked.is_empty():
+		return
+	var F: float = world.FENCE - 0.6
+	for i in range(kicked.size() - 1, -1, -1):
+		var k: Dictionary = kicked[i]
+		var rec: Dictionary = k.rec
+		if not rec.live:
+			kicked.remove_at(i)
+			continue
+		var h: float = SIZES[rec.size].h
+		var v: Vector3 = k.vel
+		v.y -= KICK_GRAVITY * dt
+		var p: Vector3 = rec.pos
+		var np := p + v * dt
+		# walls and buildings: anything solid standing higher than the parcel's bottom turns it back
+		var blocked: bool = absf(np.x) > F or absf(np.z) > F or world.house_at(np.x, np.z)
+		if not blocked:
+			for sd in _solids_at(np.x, np.z):
+				if sd.top > np.y - h / 2 + 0.15 and sd.bottom < np.y + h / 2 and world.in_rect(sd.rect, np.x, np.z, 0.2):
+					blocked = true
+					break
+		if blocked:
+			v.x *= -0.35
+			v.z *= -0.35
+			np = Vector3(p.x, np.y, p.z)
+		k.basis = (k.basis * Basis.from_euler(k.spin * dt)).orthonormalized()
+		var rest := _rest_y(rec, np.x, np.z)
+		if v.y < 0.0 and np.y <= rest:
+			if v.y < -2.2:   # bounce, losing most of the energy
+				v.y *= -0.32
+				v.x *= 0.6
+				v.z *= 0.6
+				k.spin *= 0.5
+				np.y = rest
+			else:            # settle, upright, keeping the yaw it tumbled to
+				var fwd: Vector3 = k.basis * Vector3.FORWARD
+				rec.rot = atan2(-fwd.x, -fwd.z)
+				rec.pos = Vector3(np.x, rest, np.z)
+				rec.hx = maxf(SIZES[rec.size].w, SIZES[rec.size].d) * 0.45
+				rec.hz = rec.hx
+				rec.flying = false
+				_grid_moved(rec)
+				_mm[rec.size].set_instance_transform(rec.slot, Transform3D(Basis(Vector3.UP, rec.rot), rec.pos))
+				kicked.remove_at(i)
+				continue
+		k.vel = v
+		rec.pos = np
+		_mm[rec.size].set_instance_transform(rec.slot, Transform3D(k.basis, np))
+
+
 ## Everything needed to put the parcels back where they were: loose ones by position (a parcel in mid-air
 ## counts as already landed), filed ones by the order they went into the depot
 func save_state() -> Dictionary:
@@ -485,13 +675,17 @@ func save_state() -> Dictionary:
 		if landing.has(rec):
 			var to: Vector3 = landing[rec]
 			p = Vector3(to.x, _rest_y(rec, to.x, to.z), to.z)
+		elif rec.get("flying", false):   # knocked and still tumbling: save it where it will come down
+			p = Vector3(p.x, _rest_y(rec, p.x, p.z), p.z)
 		loose.append([rec.size, snappedf(p.x, 0.001), snappedf(p.y, 0.001), snappedf(p.z, 0.001), snappedf(rec.rot, 0.001)])
 	return {"total": total, "loose": loose, "stored": Array(stored_order)}
 
 
 func load_state(d: Dictionary) -> void:
 	flights.clear()
+	kicked.clear()
 	records.clear()
+	_grid_dirty = true
 	for size in _mm:
 		var mm: MultiMesh = _mm[size]
 		_free[size] = []

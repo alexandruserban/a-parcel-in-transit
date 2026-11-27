@@ -14,6 +14,7 @@ A Godot 4.7 port of the Three.js / WebView game in `../tidyup`. It is a first-pe
   `Godot_v4.7.2-stable_win64_console.exe --path . -- --drive <folder>`
 - **Stairs test** (opens a front door, walks in and up to the landing):
   `Godot_v4.7.2-stable_win64_console.exe --headless --path . -- --stairs`
+- **Kicks test** (walks through the biggest parcel pile, then ploughs a truck-sized shove through the street piles; reports what moved and the cost per frame): `... --headless --path . -- --kicks`
 - **Kerb test** (walks onto a pavement head-on and at two slants, and back down): `... --headless --path . -- --kerb`
 - **Gust test** (starts a gust, checks every loose parcel lands somewhere new, none flies through a roof and none sinks into a plinth or another parcel): `... --path . -- --gust <folder>`
 - **Moat test** (walks out over the drawbridge and back, raises it): `... --headless --path . -- --moat`

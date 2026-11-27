@@ -133,7 +133,7 @@ func _ready() -> void:
 	if "--savetest" in OS.get_cmdline_user_args():
 		SAVE_PATH = "user://save_test.json"   # never touch the real save
 	test_mode = false
-	for a in ["--smoke", "--shot", "--drive", "--stairs", "--gust", "--moat", "--kerb"]:
+	for a in ["--smoke", "--shot", "--drive", "--stairs", "--gust", "--moat", "--kerb", "--kicks"]:
 		if a in OS.get_cmdline_user_args():
 			test_mode = true
 	if not test_mode:
@@ -164,6 +164,9 @@ func _ready() -> void:
 		return
 	if "--kerb" in OS.get_cmdline_user_args():
 		_kerb_test()
+		return
+	if "--kicks" in OS.get_cmdline_user_args():
+		_kicks_test()
 		return
 	if "--drive" in OS.get_cmdline_user_args():
 		_drive_test()
@@ -225,6 +228,7 @@ func _process(delta: float) -> void:
 			sfx.strike_hour(whole)
 		_bell_hour = whole
 	_update_wind(delta)
+	_knock_parcels(delta)
 	ducks.update(delta, player.global_position)
 	var night: bool = sky.is_night()
 	if night != is_night:
@@ -601,6 +605,23 @@ func _update_wind(delta: float) -> void:
 	leaves.initial_velocity_max = speed * 1.1
 
 
+## Walking or driving into loose parcels knocks them aside
+var kick_usec := 0    # time the last kick test took (for the --kicks test)
+func _knock_parcels(delta: float) -> void:
+	var t0 := Time.get_ticks_usec()
+	if truck.driving:
+		if absf(truck.speed) > 0.6:
+			var f: Vector2 = truck.fwd()
+			var v: Vector3 = Vector3(f.x, 0, f.y) * truck.speed
+			for off in [2.6, 0.4, -1.8]:   # three circles down the length of the truck
+				var c: Vector2 = truck.pos + f * off
+				parcels.kick_from(Vector3(c.x, 0.0, c.y), 1.35, 3.0, v, clampf(1.0 + absf(truck.speed) * 0.12, 1.2, 2.6))
+	elif player.is_on_floor() and Vector2(player.velocity.x, player.velocity.z).length() > 0.5:
+		parcels.kick_from(player.global_position, 0.42, 1.6, player.velocity, 1.0)
+	parcels.update_kicks(delta)
+	kick_usec = Time.get_ticks_usec() - t0
+
+
 ## Room lights follow you indoors (brighter at night); ceiling fixtures glow when the lights are on
 func _update_room_lights() -> void:
 	var p: Vector3 = player.global_position
@@ -876,6 +897,90 @@ func _stairs_test() -> void:
 	await get_tree().create_timer(0.5).timeout
 	print("STAIRS: upstairs landing at y %.2f (upper floor is %.2f)" % [player.global_position.y, hp.UP])
 	get_tree().quit()
+
+
+## Walk through a parcel pile, then plough a truck-sized shove through several piles; report what moved and
+## what the knock code costs per frame
+func _kicks_test() -> void:
+	get_tree().paused = false
+	hud.show_menu(false)
+	started = true
+	# the biggest pile: the loose parcel with the most neighbours within 2.5 m
+	var best: Dictionary = {}
+	var best_n := 0
+	for r in parcels.records:
+		if r.stored:
+			continue
+		var cnt := 0
+		for q in parcels.records:
+			if not q.stored and absf(q.pos.x - r.pos.x) < 2.5 and absf(q.pos.z - r.pos.z) < 2.5:
+				cnt += 1
+		if cnt > best_n:
+			best_n = cnt
+			best = r
+	var centre: Vector3 = best.pos
+	var before := {}   # keyed by size and slot (a record dictionary as a key changes with its contents)
+	for r in parcels.records:
+		before["%s%d" % [r.size, r.slot]] = r.pos
+	# walk straight through it
+	var from := Vector3(centre.x - 2.6, world.ground_y_at(centre.x - 2.6, centre.z) + 0.1, centre.z)
+	player.global_position = from
+	player.yaw = 0.0
+	for i in 5:
+		await get_tree().physics_frame
+	player.move_input = Vector2(1, 0)   # towards +x, through the pile
+	var worst := 0
+	var frames := 0
+	var total := 0
+	var peak_moving := 0
+	var t := 0.0
+	while t < 1.6:
+		await get_tree().process_frame
+		t += get_process_delta_time()
+		worst = maxi(worst, kick_usec)
+		total += kick_usec
+		frames += 1
+		peak_moving = maxi(peak_moving, parcels.kicked.size())
+	player.move_input = Vector2.ZERO
+	for i in 120:   # let them land
+		await get_tree().process_frame
+		worst = maxi(worst, kick_usec)
+	var moved := 0
+	for r in parcels.records:
+		var key := "%s%d" % [r.size, r.slot]
+		if before.has(key) and r.pos.distance_to(before[key]) > 0.3:
+			moved += 1
+	print("KICKS: walking through a pile of %d: %d parcels knocked aside, %d in the air at once; knock code avg %d us, worst %d us per frame" % [best_n, moved, peak_moving, total / maxi(frames, 1), worst])
+	# a truck-sized shove ploughing along 40 m of the street piles (the worst case)
+	var tw := 0
+	var tf := 0
+	var tt := 0
+	var tmoving := 0
+	var start: Vector3 = centre + Vector3(-20, 0, 0)
+	for k in 150:
+		var c := start + Vector3(k * 0.27, 0, 0)
+		var t0 := Time.get_ticks_usec()
+		for off in [2.6, 0.4, -1.8]:
+			parcels.kick_from(c + Vector3(off, 0, 0), 1.35, 3.0, Vector3(16, 0, 0), 2.6)
+		parcels.update_kicks(1.0 / 60.0)
+		var us := Time.get_ticks_usec() - t0
+		tw = maxi(tw, us)
+		tt += us
+		tf += 1
+		tmoving = maxi(tmoving, parcels.kicked.size())
+		await get_tree().process_frame
+	for i in 200:
+		var t0 := Time.get_ticks_usec()
+		parcels.update_kicks(1.0 / 60.0)
+		tw = maxi(tw, Time.get_ticks_usec() - t0)
+		await get_tree().process_frame
+	var still: int = parcels.kicked.size()
+	var floating := 0
+	for r in parcels.records:
+		if not r.stored and not r.get("flying", false) and r.pos.y > parcels._rest_y(r, r.pos.x, r.pos.z, r.pos.y - parcels.SIZES[r.size].h / 2 + 0.02) + 0.05:
+			floating += 1
+	print("KICKS: truck plough: up to %d parcels tumbling at once; avg %d us, worst %d us per frame; %d still moving after, %d left floating" % [tmoving, tt / maxi(tf, 1), tw, still, floating])
+	get_tree().quit(0 if moved > 0 and still == 0 and floating == 0 else 1)
 
 
 ## Walk from the Ulmenstraße onto its pavement at walking speed, head-on and at a slant, and off again
