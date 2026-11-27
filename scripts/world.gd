@@ -1435,10 +1435,7 @@ func _city_wall() -> void:
 	for s in [-1, 1]:
 		bx(I, s * 4.5, GH / 2, gzc, 4.0, GH, gd, stn, true)
 	b.box(I, Vector3(0, (GH + 7.5) / 2, gzc), Vector3(5.0, GH - 7.5, gd), stn, 1.0, true, true)   # closed underneath
-	for zf in [gz0 - 0.02, gz1 + 0.02]:
-		var o := Vector3(0, 0, -1) if zf < gzc else Vector3(0, 0, 1)
-		b.tri(I, Vector3(-2.5, 6.2, zf), Vector3(2.5, 6.2, zf), Vector3(0, 7.5, zf), mats.recess, o)
-	b.box(I, Vector3(0, 6.85, gzc), Vector3(5.0, 1.3, gd - 0.1), mats.recess, 1.0, false, true)   # the passage vault
+	_gate_vault(gz0, gz1)
 	bx(I, 0, 0.03, gzc, 5.0, 0.04, gd, mats.cobble, false, false)
 	# the gate passage is open: it leads out onto the drawbridge (moat.gd)
 	# spire and corner turrets
@@ -1466,6 +1463,76 @@ func _city_wall() -> void:
 	b.cylinder(cxf * Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3.ZERO), Vector3.ZERO, 1.6, 1.6, 0.06, 32, mats.white, true, 1.0, false)
 	b.box(cxf, Vector3(0, 0.45, 0.08), Vector3(0.1, 1.0, 0.03), mats.iron, 1.0, false)
 	b.box(cxf, Vector3(-0.3, 0, 0.09), Vector3(0.7, 0.08, 0.03), mats.iron, 1.0, false)
+
+
+## The gate passage's ceiling: a pointed vault (warm plaster) springing at 6.2 m between the piers, with
+## sandstone transverse ribs and a ridge rib, a gilt boss in the middle, stone spandrels filling the faces round
+## the arch, and an iron lantern hanging on a chain that lights up at night
+func _gate_vault(gz0: float, gz1: float) -> void:
+	var I := Transform3D.IDENTITY
+	var Y0 := 6.2
+	var arch := Castle.arch_pts(5.0, 0.0, 1.3, 0.0, 10)   # (x, y) from (-2.5, 0) over the apex to (2.5, 0)
+	var web: Material = tmat("plaster_efe2c0", Vector2(3, 3), {"rough": 0.95})
+	var rib: Material = mats.sandstone
+	var gzc := (gz0 + gz1) / 2
+	var axis := Vector3(0, Y0 - 1.5, 0)
+	# the vault surface, seen from below
+	for i in arch.size() - 1:
+		var p0: Vector2 = arch[i]
+		var p1: Vector2 = arch[i + 1]
+		var mid := Vector3((p0.x + p1.x) / 2, Y0 + (p0.y + p1.y) / 2, 0)
+		var out := (axis - mid).normalized()
+		b.quad(I, Vector3(p0.x, Y0 + p0.y, gz0), Vector3(p1.x, Y0 + p1.y, gz0), Vector3(p1.x, Y0 + p1.y, gz1), Vector3(p0.x, Y0 + p0.y, gz1), web, out, 3.0, false)
+	# transverse ribs following the arch, and the ridge rib along the top
+	var n := 4
+	for k in n:
+		var z: float = gz0 + 0.35 + k * (gz1 - gz0 - 0.7) / (n - 1)
+		for i in arch.size() - 1:
+			var p0: Vector2 = arch[i]
+			var p1: Vector2 = arch[i + 1]
+			var a3 := Vector3(p0.x, Y0 + p0.y, z)
+			var c3 := Vector3(p1.x, Y0 + p1.y, z)
+			var dir := (c3 - a3).normalized()
+			var nrm := (axis - (a3 + c3) / 2)
+			nrm = (nrm - dir * nrm.dot(dir)).normalized()
+			var bas := Basis(dir, nrm, dir.cross(nrm))
+			b.box(Transform3D(bas, (a3 + c3) / 2 + nrm * 0.07), Vector3.ZERO, Vector3(a3.distance_to(c3) + 0.06, 0.14, 0.26), rib, 3.0, false)
+	b.box(I, Vector3(0, Y0 + 1.3 - 0.07, gzc), Vector3(0.22, 0.14, gz1 - gz0), rib, 3.0, false)
+	b.cylinder(I, Vector3(0, Y0 + 1.3 - 0.26, gzc), 0.2, 0.26, 0.14, 16, mats.gilt, true, 1.0, false)
+	# spandrels: the face of the tower round the pointed head of the archway, both sides
+	for zf in [gz1 + 0.01, gz0 - 0.01]:
+		var front: bool = zf > gzc
+		var f := Transform3D(Basis() if front else Basis(Vector3.UP, PI), Vector3(0, Y0, zf))
+		for side in [-1.0, 1.0]:
+			# the corner above the springing: along the top to the apex, then down the arch back to the wall
+			var pts := PackedVector2Array([Vector2(side * 2.5, 1.3), Vector2(0.0, 1.3)])
+			var curve: Array = []
+			for q in arch:
+				if q.x * side >= -0.001:
+					curve.append(q)
+			if side < 0:
+				curve.reverse()   # the left half runs wall -> apex; walk it apex -> wall (the right half already does)
+			for q in curve:
+				pts.append(q)
+			var poly := PackedVector2Array()
+			for q in pts:
+				var v := q if front else Vector2(-q.x, q.y)
+				if poly.is_empty() or poly[poly.size() - 1].distance_to(v) > 0.001:
+					poly.append(v)
+			if poly[0].distance_to(poly[poly.size() - 1]) < 0.001:
+				poly.remove_at(poly.size() - 1)
+			b.polygon(f, poly, mats.palestone, 3.0, false)
+	# the lantern: a chain from the boss, an iron cage with a glowing glass lamp inside
+	var ly := Y0 + 1.3 - 1.7
+	b.box(I, Vector3(0, (ly + 0.45 + Y0 + 1.04) / 2, gzc), Vector3(0.03, Y0 + 1.04 - ly - 0.45, 0.03), mats.iron, 1.0, false)
+	b.cylinder(I, Vector3(0, ly + 0.36, gzc), 0.24, 0.0, 0.18, 8, mats.iron, false, 1.0, false)
+	b.box(I, Vector3(0, ly + 0.36, gzc), Vector3(0.38, 0.03, 0.38), mats.iron, 1.0, false)
+	b.box(I, Vector3(0, ly - 0.06, gzc), Vector3(0.32, 0.04, 0.32), mats.iron, 1.0, false)
+	for cx in [-0.16, 0.16]:
+		for cz in [-0.16, 0.16]:
+			b.box(I, Vector3(cx, ly + 0.15, gzc + cz), Vector3(0.025, 0.42, 0.025), mats.iron, 1.0, false)
+	b.box(I, Vector3(0, ly + 0.15, gzc), Vector3(0.28, 0.38, 0.28), mats.lamp, 1.0, false)
+	lamp_sources.append(Vector3(0, ly + 0.15, gzc))
 
 
 ## Frame round a clock dial of radius r (cxf: the dial's centre on the wall, +z out of it): a square sandstone

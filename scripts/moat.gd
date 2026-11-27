@@ -52,7 +52,14 @@ func build(world) -> void:
 			var along_x: bool = sd[0] == 0
 			var x: float = sd[0] * off
 			var z: float = sd[1] * off
-			w.bx(I, x, (0.06 + FY) / 2, z, 2 * c if along_x else t, 0.06 - FY, t if along_x else 2 * c, stone, false, true, 1.0)
+			if sd[1] == -1:   # north banks: a gap where the bridge lands, with a seat under the deck (its top used
+				# to be level with the deck's and flickered through it at both ends)
+				for half in [-1.0, 1.0]:
+					var l2 := c - BW / 2
+					w.bx(I, half * (BW / 2 + l2 / 2), (0.06 + FY) / 2, z, l2, 0.06 - FY, t, stone, false, true, 1.0)
+				w.bx(I, 0, (-0.3 + FY) / 2, z, BW, -0.3 - FY, t, stone, false, true, 1.0)
+			else:
+				w.bx(I, x, (0.06 + FY) / 2, z, 2 * c if along_x else t, 0.06 - FY, t if along_x else 2 * c, stone, false, true, 1.0)
 			# coping, with a gap where the drawbridge lands on each bank
 			if sd[1] == -1:
 				for half in [-1.0, 1.0]:
