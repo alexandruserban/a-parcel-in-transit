@@ -287,11 +287,21 @@ func _footprints_touch(ax: float, az: float, arot: float, asize: String, bx: flo
 ## from that until it is clear, then rests on what carries its centre. Returns (x, rest y, z).
 ## stack false (kicked parcels): parcels under it are obstacles to slide off, not something to rest on; the
 ## wind may set a parcel down on another one (stack true)
+var settle_us := 0
+var settle_steps := 0
 func _settle_spot(rec: Dictionary, x: float, z: float, stack := true) -> Vector3:
+	var t0 := Time.get_ticks_usec()
+	var r := _settle_spot_inner(rec, x, z, stack)
+	settle_us += Time.get_ticks_usec() - t0
+	return r
+
+
+func _settle_spot_inner(rec: Dictionary, x: float, z: float, stack := true) -> Vector3:
 	var S: Dictionary = SIZES[rec.size]
 	var h: float = S.h
 	var hx: float = maxf(S.w, S.d) * 0.45
 	for step in 16:
+		settle_steps += 1
 		var rest := _rest_y(rec, x, z, INF, stack)
 		var base := rest - h / 2 - 0.01
 		if _on_ground(rec, x, z, rest):
@@ -321,6 +331,9 @@ func _settle_spot(rec: Dictionary, x: float, z: float, stack := true) -> Vector3
 				if d.length() < 0.01:
 					d = Vector2(x, z) - r.get_center()
 				push += d.normalized() if d.length() > 0.01 else Vector2(1, 0)
+		var tov := _truck_overlap(x, z, maxf(S.w, S.d) * 0.5 + GAP)
+		if not tov.is_empty() and tov.top > base + 0.03:
+			push += tov.out * 2.0
 		if push.length() < 0.001:
 			return Vector3(x, rest, z)
 		push = push.normalized()
@@ -336,7 +349,7 @@ func update_gust(gust_t: float, gust: float, dt: float) -> void:
 	var done := 0
 	for f in flights:
 		var rec: Dictionary = f.rec
-		if not rec.live:
+		if not rec.live or f.get("handed", false):   # gone, or bounced off the truck (now a knocked parcel)
 			done += 1
 			continue
 		var h: float = SIZES[rec.size].h
@@ -348,6 +361,16 @@ func update_gust(gust_t: float, gust: float, dt: float) -> void:
 			if rec.flying:
 				var to: Vector3 = f.to
 				if not f.has("rest_y"):
+					var tov := _truck_overlap(to.x, to.z, maxf(SIZES[rec.size].w, SIZES[rec.size].d) * 0.45)
+					if not tov.is_empty():   # coming down on the truck: hit the roof and bounce off
+						var out: Vector2 = tov.out
+						rec.pos = Vector3(to.x, tov.top + SIZES[rec.size].h / 2 + 0.02, to.z)
+						kicked.append({"rec": rec, "vel": Vector3(out.x * 2.6, 2.4, out.y * 2.6),
+							"spin": Vector3(out.y, 0.3, -out.x) * 4.0, "basis": f.basis})
+						f.handed = true
+						game_sound(1, 1.5)
+						done += 1
+						continue
 					var S0: Dictionary = SIZES[rec.size]
 					rec.hx = maxf(S0.w, S0.d) * 0.45
 					rec.hz = rec.hx
@@ -752,6 +775,34 @@ func _on_ground(rec: Dictionary, x: float, z: float, rest: float) -> bool:
 	return absf(rest - (world.ground_y_at(x, z) + SIZES[rec.size].h / 2 + 0.01)) < 0.02
 
 
+## The delivery truck as an obstacle for parcels: its footprint (7.6 x 2.6 m with the mirrors) turned with it,
+## and a roof about 3.4 m above its ride height. Returns {lx, lz, top} for a point, in the truck's frame.
+const TRUCK_HL := 3.8
+const TRUCK_HW := 1.3
+var truck = null   # set by main.gd
+func _truck_frame(x: float, z: float) -> Dictionary:
+	var t = truck
+	if t == null:
+		return {}
+	var d := Vector2(x - t.pos.x, z - t.pos.y)
+	var h: float = t.heading
+	return {"lx": d.dot(Vector2(cos(h), sin(h))), "lz": d.dot(Vector2(-sin(h), cos(h))), "top": float(t.ride_y) + 3.4, "h": h}
+
+
+## Is a parcel of half-size `half` at (x, z) over the truck's footprint? Then the shortest way out, in the world.
+func _truck_overlap(x: float, z: float, half: float) -> Dictionary:
+	var f := _truck_frame(x, z)
+	if f.is_empty():
+		return {}
+	var ex: float = TRUCK_HL + half - absf(f.lx)
+	var ez: float = TRUCK_HW + half - absf(f.lz)
+	if ex <= 0.0 or ez <= 0.0:
+		return {}
+	var h: float = f.h
+	var out := Vector2(cos(h), sin(h)) * signf(f.lx) if ex < ez else Vector2(-sin(h), cos(h)) * signf(f.lz)
+	return {"out": out, "depth": minf(ex, ez), "top": f.top}
+
+
 ## Move the knocked parcels: gravity, tumbling, a bounce or two, walls turn them back; then they settle upright
 func update_kicks(dt: float) -> void:
 	_kick_sound_t -= dt
@@ -769,6 +820,24 @@ func update_kicks(dt: float) -> void:
 		v.y -= KICK_GRAVITY * dt
 		var p: Vector3 = rec.pos
 		var np := p + v * dt
+		# the truck: landing on its roof bounces the parcel up and off the nearer side; hitting a side turns it back
+		var tov := _truck_overlap(np.x, np.z, maxf(SIZES[rec.size].w, SIZES[rec.size].d) * 0.45)
+		if not tov.is_empty() and np.y - h / 2 < tov.top:
+			var out: Vector2 = tov.out
+			if p.y - h / 2 >= tov.top - 0.2:   # came down onto the roof
+				np.y = tov.top + h / 2
+				v.y = maxf(absf(v.y) * 0.45, 2.2)
+				v.x = v.x * 0.5 + out.x * 2.6
+				v.z = v.z * 0.5 + out.y * 2.6
+				k.spin = k.spin * 0.7 + Vector3(out.y, 0, -out.x) * 3.0
+			else:                              # ran into its side
+				np = Vector3(p.x, np.y, p.z)
+				var hs := maxf(Vector2(v.x, v.z).length() * 0.5, 1.2)
+				v.x = out.x * hs
+				v.z = out.y * hs
+			if _kick_sound_t <= 0.0:
+				game_sound(1, 1.5)
+				_kick_sound_t = 0.12
 		# walls and buildings: anything solid standing higher than the parcel's bottom turns it back
 		var blocked: bool = absf(np.x) > F or absf(np.z) > F or world.house_at(np.x, np.z)
 		if not blocked:

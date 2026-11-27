@@ -152,6 +152,20 @@ const STEP_LEN := {"grass": 0.34, "stone": 0.36}
 const STEP_REF := {"grass": 0.4, "stone": 0.28}     # the peak every step is evened out to
 const STEP_DB := {"grass": -6.0, "stone": -3.0}      # pavement steps peak near -6 dB, grass a few dB softer
 var step_streams := {}
+## The steps and knocks as short WAVs cut by tools/cut_sounds.gd (played from their start: no MP3 seeking, which
+## costs up to ~45 ms a step in the long stone recording); by surface, in STEP_CUTS order
+const CUT_DIR := "res://assets/music/sounds/cuts/"
+var step_wavs := {"grass": [], "stone": []}
+var roll_wavs: Array = []
+
+
+func _load_cut(name: String) -> AudioStream:
+	var path := CUT_DIR + name + ".wav"
+	if ResourceLoader.exists(path):
+		return load(path)
+	if FileAccess.file_exists(path):
+		return AudioStreamWAV.load_from_file(path)
+	return null
 var step_players: Array[AudioStreamPlayer] = []
 var _step_i := 0
 var _step_last := {"grass": -1, "stone": -1}
@@ -161,7 +175,7 @@ var _step_last := {"grass": -1, "stone": -1}
 ## start [s], measured peak and length (the papery synthesised bump stands in if the file is missing)
 const ROLL_FILE := "res://assets/music/sounds/parcel-rolling.mp3"
 const ROLL_CUTS := [[0.205, 1.0, 0.56], [2.005, 0.7, 0.36], [4.205, 0.49, 0.27], [6.7, 0.75, 0.43], [8.065, 0.83, 0.35]]
-const ROLL_DB := 2.0   # knocks peak near -9 dB at the default effects level, just under the footsteps
+const ROLL_DB := -16.0   # knocks peak near -9 dB at the default effects level, just under the footsteps
 var roll_stream: AudioStream
 var roll_players: Array[AudioStreamPlayer] = []
 var _roll_i := 0
@@ -171,7 +185,7 @@ var _roll_last := -1
 func parcel_roll(count: int, power: float) -> void:
 	if not enabled:
 		return
-	if roll_stream == null:
+	if roll_stream == null and roll_wavs.is_empty():
 		play("parcel_bump", -8.0 + minf(count, 4) * 1.2 + (2.0 if power > 1.4 else 0.0), rng.randf_range(0.9, 1.15))
 		return
 	var i := rng.randi() % ROLL_CUTS.size()
@@ -182,15 +196,33 @@ func parcel_roll(count: int, power: float) -> void:
 	var p := roll_players[_roll_i]
 	_roll_i = (_roll_i + 1) % roll_players.size()
 	var db: float = ROLL_DB + linear_to_db(0.8 / float(c[1])) + minf(count - 1, 3) * 1.0 + (2.0 if power > 1.4 else 0.0)
-	p.stream = roll_stream
 	p.pitch_scale = rng.randf_range(0.92, 1.08)
 	p.volume_db = db
+	if roll_wavs.size() == ROLL_CUTS.size():
+		p.stream = roll_wavs[i]
+		p.remove_meta("end")
+		p.play()
+		return
+	p.stream = roll_stream
 	p.set_meta("db", db)
 	p.set_meta("end", Time.get_ticks_msec() / 1000.0 + (float(c[2]) + 0.08) / p.pitch_scale)
 	p.play(float(c[0]))
 
 
 func _load_steps() -> void:
+	for key in step_wavs:
+		for i in STEP_CUTS[key].size():
+			var w := _load_cut("%s_%02d" % [key, i])
+			if w == null:
+				step_wavs[key] = []
+				break
+			step_wavs[key].append(w)
+	for i in ROLL_CUTS.size():
+		var w := _load_cut("roll_%02d" % i)
+		if w == null:
+			roll_wavs = []
+			break
+		roll_wavs.append(w)
 	if ResourceLoader.exists(ROLL_FILE):
 		roll_stream = load(ROLL_FILE)
 	elif FileAccess.file_exists(ROLL_FILE):
@@ -245,12 +277,17 @@ func footstep(surface: String, sprint := false) -> void:
 		var p := step_players[_step_i]
 		_step_i = (_step_i + 1) % step_players.size()
 		var db: float = STEP_DB[key] + clampf(linear_to_db(STEP_REF[key] / float(c[1])), -6.0, 8.0) + (3.0 if sprint else 0.0)
-		p.stream = step_streams[key]
 		p.pitch_scale = rng.randf_range(0.95, 1.05)
 		p.volume_db = db
-		p.set_meta("db", db)
-		p.set_meta("end", Time.get_ticks_msec() / 1000.0 + STEP_LEN[key] / p.pitch_scale)
-		p.play(float(c[0]))
+		if step_wavs[key].size() == cuts.size():   # the cut WAV, from its start (it fades out by itself)
+			p.stream = step_wavs[key][i]
+			p.remove_meta("end")
+			p.play()
+		else:
+			p.stream = step_streams[key]
+			p.set_meta("db", db)
+			p.set_meta("end", Time.get_ticks_msec() / 1000.0 + STEP_LEN[key] / p.pitch_scale)
+			p.play(float(c[0]))
 		return
 	# no recordings: the synthesised steps
 	if surface == "grass":

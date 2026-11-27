@@ -97,6 +97,7 @@ func _ready() -> void:
 	truck.game = self
 	truck.world = world
 	add_child(truck)
+	parcels.truck = truck   # parcels bounce off the truck
 
 	for i in LAMP_POOL:
 		var l := OmniLight3D.new()
@@ -986,11 +987,15 @@ func _kicks_test() -> void:
 	var start: Vector3 = centre + Vector3(-20, 0, 0)
 	for k in 150:
 		var c := start + Vector3(k * 0.27, 0, 0)
+		parcels.settle_us = 0
+		parcels.settle_steps = 0
 		var t0 := Time.get_ticks_usec()
 		for off in [2.6, 0.4, -1.8]:
 			parcels.kick_from(c + Vector3(off, 0, 0), 1.35, 3.0, Vector3(16, 0, 0), 2.6)
 		parcels.update_kicks(1.0 / 60.0)
 		var us := Time.get_ticks_usec() - t0
+		if us > 4000:
+			print("KICKS:   slow frame %d us: settling %d us in %d steps, %d tumbling" % [us, parcels.settle_us, parcels.settle_steps, parcels.kicked.size()])
 		tw = maxi(tw, us)
 		tt += us
 		tf += 1
@@ -1030,6 +1035,8 @@ func _kicks_test() -> void:
 	truck.heading = PI / 2
 	for i in 60:
 		await get_tree().physics_frame
+	var ride_on_kerb: float = truck.ride_y
+	var roll_on_kerb: float = truck.ride_roll
 	var sink := 0.0
 	for wh in truck.wheels:
 		var c: Vector3 = wh.pivot.global_position
@@ -1064,6 +1071,31 @@ func _kicks_test() -> void:
 		truck.speed = 0.0
 		truck.exit()
 	print("KICKS: truck backing away from a lamp post it had run into: moved %.1f m" % escaped)
+	# parcels dropped onto the truck from above bounce off it: none ends up on the roof or inside the truck
+	truck.pos = Vector2(-25, 2.5)
+	truck.heading = PI
+	truck._update_ride(1.0)
+	truck._sync()
+	var dropped: Array = []
+	for r in parcels.records:
+		if dropped.size() >= 6:
+			break
+		if not r.stored and not r.get("flying", false) and r.pos.distance_to(Vector3(-25, 0, 2.5)) > 30.0:
+			dropped.append(r)
+	var di := 0
+	for r in dropped:
+		r.pos = Vector3(-25.0 + (di - 2.5) * 1.1, 5.5 + di * 0.3, 2.5 + (0.3 if di % 2 == 0 else -0.3))
+		parcels._start_kick(r, Vector3(0, -0.5, 0))
+		di += 1
+	for i in 300:
+		parcels.update_kicks(1.0 / 60.0)
+		await get_tree().process_frame
+	var on_truck := 0
+	for r in dropped:
+		var half: float = maxf(parcels.SIZES[r.size].w, parcels.SIZES[r.size].d) * 0.45
+		if r.get("flying", false) or not parcels._truck_overlap(r.pos.x, r.pos.z, half - 0.05).is_empty():
+			on_truck += 1
+	print("KICKS: parcels dropped onto the truck: %d, still on or in it after bouncing: %d" % [dropped.size(), on_truck])
 	var overlaps_end := _count_overlaps()
 	# a knocked parcel never ends up on top of another (only the wind may stack them)
 	var kicked_on_top := 0
@@ -1077,9 +1109,9 @@ func _kicks_test() -> void:
 			kicked_on_top += 1
 	print("KICKS: knocked parcels that ended up on another parcel: %d" % kicked_on_top)
 	print("KICKS: parcels inside one another: %d at the start, %d after all the knocking" % [overlaps_start, overlaps_end])
-	print("KICKS: parcels hanging across a kerb edge: %d; truck half on the pavement: ride %.2f m, roll %.1f deg, deepest wheel sinks %.2f m" % [straddle, truck.ride_y, rad_to_deg(truck.ride_roll), sink])
+	print("KICKS: parcels hanging across a kerb edge: %d; truck half on the pavement: ride %.2f m, roll %.1f deg, deepest wheel sinks %.2f m" % [straddle, ride_on_kerb, rad_to_deg(roll_on_kerb), sink])
 	print("KICKS: truck plough: up to %d parcels tumbling at once; avg %d us, worst %d us per frame; %d still moving after, %d left floating" % [tmoving, tt / maxi(tf, 1), tw, still, floating])
-	get_tree().quit(0 if moved > 0 and still == 0 and floating == 0 and straddle == 0 and sink < 0.08 and kicked_on_top == 0 and overlaps_end == 0 and escaped > 1.0 else 1)
+	get_tree().quit(0 if moved > 0 and still == 0 and floating == 0 and straddle == 0 and sink < 0.08 and kicked_on_top == 0 and overlaps_end == 0 and escaped > 1.0 and on_truck == 0 else 1)
 
 
 ## Walk from the Ulmenstraße onto its pavement at walking speed, head-on and at a slant, and off again

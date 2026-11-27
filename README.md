@@ -59,7 +59,11 @@ The town is generated in code, as in the web version. The textures are the web g
 python tools/export_textures.py
 ```
 
-Then open the project once (or run `--import`) so Godot re-imports them. The `_nrm` files must keep `compress/normal_map=1` in their `.import` files.
+Then open the project once (or run `--import`) so Godot re-imports them. The recorded footsteps and parcel knocks (`assets/music/sounds/*.mp3`) are cut into short WAVs in `assets/music/sounds/cuts/` by `tools/cut_sounds.gd` (playing an MP3 from the middle stutters); run it again after changing the recordings or the cut lists in `scripts/sfx.gd`:
+
+```
+Godot_v4.7.2-stable_win64_console.exe --headless --path . --script tools/cut_sounds.gd
+``` The `_nrm` files must keep `compress/normal_map=1` in their `.import` files.
 
 | File | Ported from | What it does |
 |---|---|---|
