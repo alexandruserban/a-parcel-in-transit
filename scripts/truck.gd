@@ -25,6 +25,8 @@ var wheels: Array = []                # [{pivot, spin, steerable}]
 var head_mat: StandardMaterial3D
 var tail_mat: StandardMaterial3D
 var beam: SpotLight3D
+var rear_beam: SpotLight3D          # work lamp over the rear door: lights up behind the truck at night
+var rear_lamp_mat: StandardMaterial3D
 var cab_light: OmniLight3D
 var steer_wheel: Node3D
 var ind_mat: Array = []
@@ -200,6 +202,11 @@ func _build_model() -> void:
 			var a := PI * (0.12 + 0.76 * k / 15.0)
 			B.call(0.16, 0.03, 0.7, dark, -2.3 + cos(a) * 0.62, 0.5 + sin(a) * 0.62, s * 1.08, a - PI / 2)
 		B.call(0.025, 0.55, 0.66, dark, -2.98, 0.5, s * 1.08)
+	# rear work lamp above the roll-up door: a dark housing with a lens facing back
+	rear_lamp_mat = _lamp(Color("#fff4dc"))
+	B.call(0.16, 0.16, 0.5, dark, -3.79, 3.2, 0)
+	B.call(0.02, 0.11, 0.42, rear_lamp_mat, -3.88, 3.2, 0)
+	B.call(0.2, 0.03, 0.56, dark, -3.79, 3.3, 0)   # a little hood over it
 	_cab_interior(b)
 	b.commit(self)
 	_build_wipers(dark)
@@ -226,10 +233,19 @@ func _build_model() -> void:
 	beam.spot_angle = rad_to_deg(0.55)
 	beam.spot_angle_attenuation = 1.5
 	beam.shadow_enabled = true
-	beam.position = Vector3(3.7, 1.3, 0)
-	beam.look_at_from_position(beam.position, Vector3(14, 0, 0), Vector3.UP)
+	var bp := Vector3(3.7, 1.3, 0)
+	beam.transform = Transform3D(Basis.looking_at(Vector3(14, 0, 0) - bp, Vector3.UP), bp)   # (look_at needs the tree)
 	beam.visible = false
 	add_child(beam)
+	rear_beam = SpotLight3D.new()
+	rear_beam.light_color = Color("#fff4e0")
+	rear_beam.spot_range = 18.0
+	rear_beam.spot_angle = 52.0
+	rear_beam.spot_angle_attenuation = 1.2
+	var rp := Vector3(-3.95, 3.15, 0)
+	rear_beam.transform = Transform3D(Basis.looking_at(Vector3(-9.0, 0.0, 0) - rp, Vector3.UP), rp)   # back and down
+	rear_beam.visible = false
+	add_child(rear_beam)
 
 
 ## The cab from the inside: trimmed walls, headliner and floor facing inwards, with openings that line up with
@@ -644,6 +660,8 @@ func exit() -> void:
 	game.sfx.stop_engine()
 	game.sfx.play("door_open", -6.0)
 	beam.visible = false
+	rear_beam.visible = false
+	rear_lamp_mat.emission_energy_multiplier = 0.0
 
 
 func toggle_view() -> void:
@@ -797,6 +815,11 @@ func _physics_process(dt: float) -> void:
 	beam.visible = driving and night
 	cab_light.visible = driving and view == "cab"
 	beam.light_energy = 3.2
+	# the rear lamp: on at night while driving, full brightness when reversing
+	var reversing := driving and speed < -0.3
+	rear_beam.visible = driving and night
+	rear_beam.light_energy = 7.0 if reversing else 3.5
+	rear_lamp_mat.emission_energy_multiplier = (3.0 if reversing else 1.6) if driving and night else 0.0
 	head_mat.emission_energy_multiplier = (2.5 if night else 0.6) if driving else 0.15
 	# indicators blink on the side you're steering towards; hazards blink both while parked with cargo aboard
 	_blink += dt
