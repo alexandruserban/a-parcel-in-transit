@@ -674,9 +674,10 @@ func _smoke_test() -> void:
 	await get_tree().create_timer(3.2).timeout
 	sfx.footstep("pavement")
 	var playing := 0
-	for pl in sfx._pool:
-		if pl.playing and pl.stream == sfx.streams.step_hard:
+	for pl in sfx._pool + sfx.step_players:
+		if pl.playing and (pl.stream == sfx.streams.step_hard or pl.stream == sfx.step_streams.get("stone")):
 			playing += 1
+	print("SMOKE: recorded footsteps loaded: %s" % str(sfx.step_streams.keys()))
 	print("SMOKE: footstep after the bells struck: %s" % ("plays" if playing > 0 else "SILENT"))
 	assert(playing > 0)
 	print("SMOKE: parcels %d -> %d, stored %d, score %d, backpack %d, player y %.2f" % [before, parcels.records.size(), parcels.stored_total(), score, backpack.size(), player.global_position.y])

@@ -50,6 +50,7 @@ func _ready() -> void:
 	ambient.volume_db = -20.0
 	add_child(ambient)
 	WorkerThreadPool.add_task(_build_bell)
+	_load_steps()
 	engine = AudioStreamPlayer.new()
 	engine.stream = streams.engine
 	add_child(engine)
@@ -105,7 +106,73 @@ func play(name: String, db := 0.0, pitch := 1.0) -> void:
 	p.play()
 
 
+## Recorded footsteps (assets/music/sounds): each step is cut out of the recording by its start time [s] and
+## measured peak (to even out the levels); a footstep plays one at random for STEP_LEN seconds, fading out
+const STEP_FILES := {"grass": "res://assets/music/sounds/footstep-on-grass.mp3", "stone": "res://assets/music/sounds/footstep-on-stone.mp3"}
+const STEP_CUTS := {
+	"grass": [[0.75, 0.54], [1.16, 0.51], [1.545, 0.56], [1.915, 0.41], [2.28, 0.59], [2.795, 0.66], [3.19, 0.41], [3.82, 0.17], [4.425, 0.18], [5.505, 0.23], [6.6, 0.23], [7.16, 0.28], [7.775, 0.29], [8.39, 0.18], [8.915, 0.25], [9.41, 0.29], [10.79, 0.16], [11.44, 0.26], [11.845, 0.21], [13.315, 0.16], [16.47, 0.15], [18.505, 0.18]],
+	"stone": [[0.005, 0.25], [2.065, 0.23], [3.775, 0.28], [5.87, 0.31], [7.985, 0.21], [9.235, 0.34], [13.7, 0.21], [15.965, 0.3], [20.14, 0.21], [22.68, 0.29], [25.275, 0.29], [26.62, 0.22], [28.69, 0.24], [30.78, 0.24], [32.94, 0.28], [34.295, 0.24], [35.975, 0.26], [37.685, 0.29], [38.93, 0.23], [40.17, 0.22], [42.25, 0.41], [43.98, 0.32], [45.99, 0.24], [48.17, 0.31], [49.92, 0.33], [51.215, 0.25], [52.94, 0.2], [54.555, 0.22], [57.155, 0.23], [58.875, 0.26]],
+}
+const STEP_LEN := {"grass": 0.34, "stone": 0.36}
+const STEP_REF := {"grass": 0.4, "stone": 0.28}     # the peak every step is evened out to
+const STEP_DB := {"grass": -6.0, "stone": -3.0}      # pavement steps peak near -6 dB, grass a few dB softer
+var step_streams := {}
+var step_players: Array[AudioStreamPlayer] = []
+var _step_i := 0
+var _step_last := {"grass": -1, "stone": -1}
+
+
+func _load_steps() -> void:
+	for key in STEP_FILES:
+		var path: String = STEP_FILES[key]
+		var s: AudioStream = null
+		if ResourceLoader.exists(path):
+			s = load(path)
+		elif FileAccess.file_exists(path):
+			var m := AudioStreamMP3.new()
+			m.data = FileAccess.get_file_as_bytes(path)
+			s = m
+		if s != null:
+			step_streams[key] = s
+	for i in 4:
+		var p := AudioStreamPlayer.new()
+		add_child(p)
+		step_players.append(p)
+
+
+## Fade out and stop recorded steps at the end of their cut
+func _update_steps() -> void:
+	var now := Time.get_ticks_msec() / 1000.0
+	for p in step_players:
+		if not p.playing or not p.has_meta("end"):
+			continue
+		var left: float = p.get_meta("end") - now
+		if left <= 0.0:
+			p.stop()
+		elif left < 0.08:
+			p.volume_db = float(p.get_meta("db")) + linear_to_db(maxf(left / 0.08, 0.001))
+
+
 func footstep(surface: String, sprint := false) -> void:
+	var key := "grass" if surface == "grass" else "stone"
+	if enabled and step_streams.has(key):
+		var cuts: Array = STEP_CUTS[key]
+		var i := rng.randi() % cuts.size()
+		if i == _step_last[key]:
+			i = (i + 1) % cuts.size()
+		_step_last[key] = i
+		var c: Array = cuts[i]
+		var p := step_players[_step_i]
+		_step_i = (_step_i + 1) % step_players.size()
+		var db: float = STEP_DB[key] + clampf(linear_to_db(STEP_REF[key] / float(c[1])), -6.0, 8.0) + (3.0 if sprint else 0.0)
+		p.stream = step_streams[key]
+		p.pitch_scale = rng.randf_range(0.95, 1.05)
+		p.volume_db = db
+		p.set_meta("db", db)
+		p.set_meta("end", Time.get_ticks_msec() / 1000.0 + STEP_LEN[key] / p.pitch_scale)
+		p.play(float(c[0]))
+		return
+	# no recordings: the synthesised steps
 	if surface == "grass":
 		play("step_grass", -7.0 if sprint else -10.0, rng.randf_range(0.88, 1.12))
 	else:   # pavement, cobbles, floors: a clear heel click, a step louder than grass
@@ -273,6 +340,7 @@ func stop_engine() -> void:
 func _process(delta: float) -> void:
 	_update_gust(delta)
 	_update_bells(delta)
+	_update_steps()
 	_engine_vol = move_toward(_engine_vol, _engine_target if enabled else 0.0, delta * 0.4)
 	if engine.playing:
 		engine.pitch_scale = lerpf(engine.pitch_scale, _engine_pitch, minf(1.0, delta * 6.0))
