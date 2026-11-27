@@ -56,6 +56,7 @@ func build() -> void:
 		centres.append([s.x, s.y, false])
 
 	var specs := {"S": [], "M": [], "L": []}
+	var bases: Array = []   # every column's footprint so far: Vector3(x, z, size), so no two piles' parcels overlap
 	for cn in centres:
 		var n := 5 + rng.randi_range(0, (10 if cn[2] else 6))
 		var columns: Array = []
@@ -68,7 +69,7 @@ func build() -> void:
 			var z := 0.0
 			var y := 0.0
 			var col = columns[rng.randi_range(0, columns.size() - 1)] if columns.size() > 0 and rng.randf() < 0.45 else null
-			if col != null and col.top < 2.2 and col.foot >= foot * 0.8:
+			if col != null and col.top < 2.2 and col.foot >= foot:   # only on one at least as big: no overhang
 				x = col.x + rng.randf_range(-0.05, 0.05)
 				z = col.z + rng.randf_range(-0.05, 0.05)
 				y = col.top + S.h / 2
@@ -79,7 +80,7 @@ func build() -> void:
 				for t in 8:
 					x = cn[0] + rng.randf_range(-2.25, 2.25)
 					z = cn[1] + rng.randf_range(-2.25, 2.25)
-					ok = _free_spot(x, z, 0.5) and not world.in_warehouse(x, z, 2.0)
+					ok = _free_spot(x, z, 0.5) and not world.in_warehouse(x, z, 2.0) and not _base_taken(bases, x, z, foot)
 					if ok:
 						break
 				if not ok:
@@ -87,6 +88,9 @@ func build() -> void:
 				var adj := _off_edge(x, z, foot / 2)   # not hanging over a kerb edge
 				x = adj.x
 				z = adj.z
+				if _base_taken(bases, x, z, foot):
+					continue
+				bases.append(Vector3(x, z, foot))
 				var g0: float = adj.y
 				y = g0 + S.h / 2
 				columns.append({"x": x, "z": z, "top": g0 + S.h, "foot": foot})
@@ -122,6 +126,16 @@ func build() -> void:
 			var sp: Array = list[i]
 			_place({"size": size, "slot": i}, sp[0], sp[1], sp[2], sp[3])
 	total = records.size()
+
+
+## Would a column of this size at (x, z) overlap one already placed? (Turned at any angle, a square of side f
+## reaches out to about 0.6 f from its centre.)
+static func _base_taken(bases: Array, x: float, z: float, f: float) -> bool:
+	for b in bases:
+		var reach: float = (f + b.z) * 0.6 + 0.02
+		if absf(b.x - x) < reach and absf(b.y - z) < reach:
+			return true
+	return false
 
 
 func _free_spot(x: float, z: float, r: float) -> bool:
@@ -221,14 +235,66 @@ static func _flight_xz(f: Dictionary, t: float) -> Vector2:
 
 
 ## Where a parcel comes to rest at (x, z): on the ground, a low plinth or pedestal, or another parcel
-func _rest_y(rec: Dictionary, x: float, z: float, below := INF) -> float:
+## Where a parcel at (x, z) comes to rest: on the ground, or on whatever is under its centre - a 5 kg box
+## only stays up on a support that carries its centre of gravity (another parcel, a plinth, a low wall)
+## with_parcels false: the ground and the town's solids only (a kicked parcel never comes to rest on another)
+func _rest_y(rec: Dictionary, x: float, z: float, below := INF, with_parcels := true) -> float:
 	var S: Dictionary = SIZES[rec.size]
 	var hx: float = maxf(S.w, S.d) * 0.45
-	var top := _support_top(x, z, hx, hx, rec, below)
+	var top: float = _support_top(x, z, hx, hx, rec, below, true) if with_parcels else world.ground_y_at(x, z)
 	for sd in _solids_at(x, z):
-		if sd.top < 1.2 and world.in_rect(sd.rect, x, z, hx - 0.05):
+		if sd.top < 1.2 and sd.top <= below and world.in_rect(sd.rect, x, z, 0.0):
 			top = maxf(top, sd.top)
 	return top + S.h / 2 + 0.01
+
+
+## Settle a parcel near (x, z): if anything higher than its support overlaps its footprint (a parcel beside it,
+## a plinth or kerb it only partly covers, a wall), or it stands across a step in the ground, it slides away
+## from that until it is clear, then rests on what carries its centre. Returns (x, rest y, z).
+## stack false (kicked parcels): parcels under it are obstacles to slide off, not something to rest on; the
+## wind may set a parcel down on another one (stack true)
+func _settle_spot(rec: Dictionary, x: float, z: float, stack := true) -> Vector3:
+	var S: Dictionary = SIZES[rec.size]
+	var h: float = S.h
+	var hx: float = maxf(S.w, S.d) * 0.45
+	for step in 16:
+		var rest := _rest_y(rec, x, z, INF, stack)
+		var base := rest - h / 2 - 0.01
+		if _on_ground(rec, x, z, rest):
+			var e := _off_edge(x, z, maxf(S.w, S.d) / 2)
+			if absf(e.x - x) + absf(e.z - z) > 0.001:
+				x = e.x
+				z = e.z
+				continue
+		var push := Vector2.ZERO
+		for q in _nearby(x, z, 1.2):
+			if q == rec or q.stored or (q.get("flying", false) and not q.has("rest_y")):
+				continue
+			var qh: float = SIZES[q.size].h
+			var qy: float = q.rest_y if q.get("flying", false) else q.pos.y
+			if qy + qh / 2 <= base + 0.03 or qy - qh / 2 >= base + h - 0.02:
+				continue   # below its support or above it
+			var dx: float = x - q.pos.x
+			var dz: float = z - q.pos.z
+			if absf(dx) < hx + q.hx - 0.03 and absf(dz) < hx + q.hz - 0.03:
+				var d := Vector2(dx, dz)
+				push += d.normalized() if d.length() > 0.01 else Vector2(1, 0)
+		for sd in _solids_at(x, z):
+			if sd.top <= base + 0.03 or sd.bottom >= base + h - 0.02:
+				continue
+			var r: Rect2 = sd.rect
+			if world.in_rect(r, x, z, hx - 0.03):
+				var cp := Vector2(clampf(x, r.position.x, r.end.x), clampf(z, r.position.y, r.end.y))
+				var d := Vector2(x, z) - cp
+				if d.length() < 0.01:
+					d = Vector2(x, z) - r.get_center()
+				push += d.normalized() if d.length() > 0.01 else Vector2(1, 0)
+		if push.length() < 0.001:
+			return Vector3(x, rest, z)
+		push = push.normalized()
+		x += push.x * 0.15
+		z += push.y * 0.15
+	return Vector3(x, _rest_y(rec, x, z, INF, stack), z)
 
 
 ## gust_t: seconds since the gust began; gust: its strength 0..1
@@ -253,13 +319,11 @@ func update_gust(gust_t: float, gust: float, dt: float) -> void:
 					var S0: Dictionary = SIZES[rec.size]
 					rec.hx = maxf(S0.w, S0.d) * 0.45
 					rec.hz = rec.hx
-					var r0 := _rest_y(rec, to.x, to.z)
-					if _on_ground(rec, to.x, to.z, r0):   # not across a kerb edge
-						var e := _off_edge(to.x, to.z, maxf(S0.w, S0.d) / 2)
-						to = Vector3(e.x, to.y, e.z)
-						f.to = to
+					var spot := _settle_spot(rec, to.x, to.z)   # clear of kerb edges, neighbours and walls
+					to = Vector3(spot.x, to.y, spot.z)
+					f.to = to
 					rec.pos = Vector3(to.x, rec.pos.y, to.z)
-					f.rest_y = _rest_y(rec, to.x, to.z)
+					f.rest_y = spot.y
 					rec.rest_y = f.rest_y   # others landing here now stack on it
 				var rest_y: float = f.rest_y
 				if not f.has("land_t") and f.get("y", rest_y) > rest_y + 0.02:   # still above it (it cleared a roof): drop
@@ -409,7 +473,9 @@ func _nearby(x: float, z: float, r: float) -> Array:
 	return out
 
 
-func _support_top(x: float, z: float, hx: float, hz: float, ignore, below := INF) -> float:
+## centre_only: count only parcels under (x, z) itself (what really carries a parcel); otherwise any parcel the
+## footprint overlaps (where a dropped parcel would first touch)
+func _support_top(x: float, z: float, hx: float, hz: float, ignore, below := INF, centre_only := false) -> float:
 	var top: float = world.ground_y_at(x, z)
 	var cand := _nearby(x, z, maxf(hx, hz) + 0.6)
 	for f in flights:   # parcels from a gust that touched down and are settling (their grid cell is still the old one)
@@ -423,7 +489,9 @@ func _support_top(x: float, z: float, hx: float, hz: float, ignore, below := INF
 			if not p.has("rest_y"):
 				continue
 			py = p.rest_y
-		if absf(p.pos.x - x) < p.hx + hx - 0.03 and absf(p.pos.z - z) < p.hz + hz - 0.03:
+		var ox: float = (p.hx - 0.02) if centre_only else (p.hx + hx - 0.03)
+		var oz: float = (p.hz - 0.02) if centre_only else (p.hz + hz - 0.03)
+		if absf(p.pos.x - x) < ox and absf(p.pos.z - z) < oz:
 			var t: float = py + SIZES[p.size].h / 2
 			if t > top and t <= below:
 				top = t
@@ -677,8 +745,27 @@ func update_kicks(dt: float) -> void:
 			v.x *= -0.35
 			v.z *= -0.35
 			np = Vector3(p.x, np.y, p.z)
+		# running into a resting parcel shoves it aside (passing on part of the momentum) instead of climbing it
+		var hx: float = maxf(SIZES[rec.size].w, SIZES[rec.size].d) * 0.45
+		var forceful := Vector2(v.x, v.z).length() > 0.5 or v.y < -1.5   # a slow one just settles beside it
+		for q in (_nearby(np.x, np.z, 1.2) if forceful else []):
+			if q == rec or q.stored or q.get("flying", false):
+				continue
+			var qh: float = SIZES[q.size].h
+			if np.y - h / 2 >= q.pos.y + qh / 2 - 0.05 or np.y + h / 2 <= q.pos.y - qh / 2:
+				continue
+			var ddx: float = q.pos.x - np.x
+			var ddz: float = q.pos.z - np.z
+			if absf(ddx) < hx + q.hx - 0.04 and absf(ddz) < hx + q.hz - 0.04:
+				var away := Vector3(ddx, 0, ddz)
+				away = away.normalized() if away.length() > 0.01 else Vector3(v.x, 0, v.z).normalized()
+				var hs := Vector2(v.x, v.z).length()
+				var give := Vector3(v.x, 0, v.z) * 0.55 + away * maxf(0.4, hs * 0.3)
+				_start_kick(q, Vector3(give.x, 0.5 + hs * 0.05, give.z))
+				v.x *= 0.45
+				v.z *= 0.45
 		k.basis = (k.basis * Basis.from_euler(k.spin * dt)).orthonormalized()
-		var rest := _rest_y(rec, np.x, np.z)
+		var rest := _rest_y(rec, np.x, np.z, INF, false)
 		if v.y < 0.0 and np.y <= rest:
 			if v.y < -2.2:   # bounce, losing most of the energy
 				v.y *= -0.32
@@ -687,11 +774,10 @@ func update_kicks(dt: float) -> void:
 				k.spin *= 0.5
 				np.y = rest
 			else:            # settle, upright, keeping the yaw it tumbled to (off a kerb edge if it straddles one)
-				if _on_ground(rec, np.x, np.z, rest):
-					var e := _off_edge(np.x, np.z, maxf(SIZES[rec.size].w, SIZES[rec.size].d) / 2)
-					np.x = e.x
-					np.z = e.z
-					rest = _rest_y(rec, np.x, np.z)
+				var spot := _settle_spot(rec, np.x, np.z, false)
+				np.x = spot.x
+				np.z = spot.z
+				rest = spot.y
 				var fwd: Vector3 = k.basis * Vector3.FORWARD
 				rec.rot = atan2(-fwd.x, -fwd.z)
 				rec.pos = Vector3(np.x, rest, np.z)

@@ -903,10 +903,35 @@ func _stairs_test() -> void:
 
 ## Walk through a parcel pile, then plough a truck-sized shove through several piles; report what moved and
 ## what the knock code costs per frame
+## Resting parcels that sit inside one another (footprints and heights overlapping)
+func _count_overlaps() -> int:
+	var n := 0
+	var L: Array = []
+	for r in parcels.records:
+		if not r.stored and not r.get("flying", false):
+			L.append(r)
+	for i in L.size():
+		var a: Dictionary = L[i]
+		var ah: float = parcels.SIZES[a.size].h
+		for j in range(i + 1, L.size()):
+			var c: Dictionary = L[j]
+			if absf(a.pos.x - c.pos.x) > 1.2 or absf(a.pos.z - c.pos.z) > 1.2:
+				continue
+			var ch: float = parcels.SIZES[c.size].h
+			if absf(a.pos.x - c.pos.x) < a.hx + c.hx - 0.08 and absf(a.pos.z - c.pos.z) < a.hz + c.hz - 0.08 					and absf(a.pos.y - c.pos.y) < (ah + ch) / 2 - 0.08:
+				n += 1
+	return n
+
+
 func _kicks_test() -> void:
 	get_tree().paused = false
 	hud.show_menu(false)
 	started = true
+	var overlaps_start := _count_overlaps()
+	var stacked_before := {}   # which parcels sat on another parcel before any knocking
+	for r in parcels.records:
+		if not r.stored and r.pos.y > world.ground_y_at(r.pos.x, r.pos.z) + parcels.SIZES[r.size].h / 2 + 0.1:
+			stacked_before["%s%d" % [r.size, r.slot]] = true
 	# the biggest pile: the loose parcel with the most neighbours within 2.5 m
 	var best: Dictionary = {}
 	var best_n := 0
@@ -977,6 +1002,8 @@ func _kicks_test() -> void:
 		tw = maxi(tw, Time.get_ticks_usec() - t0)
 		await get_tree().process_frame
 	var still: int = parcels.kicked.size()
+	for kk in parcels.kicked:
+		print("KICKS:   still moving: pos %s vel %s rest %.2f" % [kk.rec.pos, kk.vel, parcels._rest_y(kk.rec, kk.rec.pos.x, kk.rec.pos.z, INF, false)])
 	var floating := 0
 	for r in parcels.records:
 		if not r.stored and not r.get("flying", false) and r.pos.y > parcels._rest_y(r, r.pos.x, r.pos.z, r.pos.y - parcels.SIZES[r.size].h / 2 + 0.02) + 0.05:
@@ -1007,9 +1034,22 @@ func _kicks_test() -> void:
 	for wh in truck.wheels:
 		var c: Vector3 = wh.pivot.global_position
 		sink = maxf(sink, world.ground_y_at(c.x, c.z) - (c.y - 0.5))
+	var overlaps_end := _count_overlaps()
+	# a knocked parcel never ends up on top of another (only the wind may stack them)
+	var kicked_on_top := 0
+	for r in parcels.records:
+		var key := "%s%d" % [r.size, r.slot]
+		if r.stored or stacked_before.has(key) or not before.has(key) or r.pos.distance_to(before[key]) < 0.3:
+			continue
+		var gy: float = world.ground_y_at(r.pos.x, r.pos.z)
+		var solid_top: float = parcels._rest_y(r, r.pos.x, r.pos.z, INF, false) - parcels.SIZES[r.size].h / 2 - 0.01
+		if r.pos.y - parcels.SIZES[r.size].h / 2 > maxf(gy, solid_top) + 0.1:
+			kicked_on_top += 1
+	print("KICKS: knocked parcels that ended up on another parcel: %d" % kicked_on_top)
+	print("KICKS: parcels inside one another: %d at the start, %d after all the knocking" % [overlaps_start, overlaps_end])
 	print("KICKS: parcels hanging across a kerb edge: %d; truck half on the pavement: ride %.2f m, roll %.1f deg, deepest wheel sinks %.2f m" % [straddle, truck.ride_y, rad_to_deg(truck.ride_roll), sink])
 	print("KICKS: truck plough: up to %d parcels tumbling at once; avg %d us, worst %d us per frame; %d still moving after, %d left floating" % [tmoving, tt / maxi(tf, 1), tw, still, floating])
-	get_tree().quit(0 if moved > 0 and still == 0 and floating == 0 and straddle == 0 and sink < 0.08 else 1)
+	get_tree().quit(0 if moved > 0 and still == 0 and floating == 0 and straddle == 0 and sink < 0.08 and kicked_on_top == 0 and overlaps_end == 0 else 1)
 
 
 ## Walk from the Ulmenstraße onto its pavement at walking speed, head-on and at a slant, and off again
