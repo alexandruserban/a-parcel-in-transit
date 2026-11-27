@@ -56,7 +56,7 @@ func build() -> void:
 		centres.append([s.x, s.y, false])
 
 	var specs := {"S": [], "M": [], "L": []}
-	var bases: Array = []   # every column's footprint so far: Vector3(x, z, size), so no two piles' parcels overlap
+	var bases := {}   # every column's footprint so far, by 2 m cell: Vector3(x, z, size), so no two parcels overlap
 	for cn in centres:
 		var n := 5 + rng.randi_range(0, (10 if cn[2] else 6))
 		var columns: Array = []
@@ -77,9 +77,9 @@ func build() -> void:
 				col.foot = foot
 			else:
 				var ok := false
-				for t in 8:
-					x = cn[0] + rng.randf_range(-2.25, 2.25)
-					z = cn[1] + rng.randf_range(-2.25, 2.25)
+				for t in 16:
+					x = cn[0] + rng.randf_range(-2.6, 2.6)
+					z = cn[1] + rng.randf_range(-2.6, 2.6)
 					ok = _free_spot(x, z, 0.5) and not world.in_warehouse(x, z, 2.0) and not _base_taken(bases, x, z, foot)
 					if ok:
 						break
@@ -90,7 +90,7 @@ func build() -> void:
 				z = adj.z
 				if _base_taken(bases, x, z, foot):
 					continue
-				bases.append(Vector3(x, z, foot))
+				_base_add(bases, x, z, foot)
 				var g0: float = adj.y
 				y = g0 + S.h / 2
 				columns.append({"x": x, "z": z, "top": g0 + S.h, "foot": foot})
@@ -130,12 +130,24 @@ func build() -> void:
 
 ## Would a column of this size at (x, z) overlap one already placed? (Turned at any angle, a square of side f
 ## reaches out to about 0.6 f from its centre.)
-static func _base_taken(bases: Array, x: float, z: float, f: float) -> bool:
-	for b in bases:
-		var reach: float = (f + b.z) * 0.6 + 0.02
-		if absf(b.x - x) < reach and absf(b.y - z) < reach:
-			return true
+## (bases: 2 m cell -> footprints placed there, so only the neighbouring cells are looked at)
+static func _base_taken(bases: Dictionary, x: float, z: float, f: float) -> bool:
+	var cx := floori(x / 2.0)
+	var cz := floori(z / 2.0)
+	for i in range(cx - 1, cx + 2):
+		for j in range(cz - 1, cz + 2):
+			for b in bases.get(Vector2i(i, j), []):
+				var reach: float = (f + b.z) * 0.72 + 0.06   # turned (and stacked turned) boxes reach 0.71 of their size
+				if absf(b.x - x) < reach and absf(b.y - z) < reach:
+					return true
 	return false
+
+
+static func _base_add(bases: Dictionary, x: float, z: float, f: float) -> void:
+	var key := Vector2i(floori(x / 2.0), floori(z / 2.0))
+	if not bases.has(key):
+		bases[key] = []
+	bases[key].append(Vector3(x, z, f))
 
 
 func _free_spot(x: float, z: float, r: float) -> bool:
@@ -248,6 +260,28 @@ func _rest_y(rec: Dictionary, x: float, z: float, below := INF, with_parcels := 
 	return top + S.h / 2 + 0.01
 
 
+const GAP := 0.06   # space left between parcels that come to rest side by side
+
+## Do two turned parcel footprints come closer than `gap`? (separating-axis test on the two rectangles; a parcel
+## of size w x d turned by rot spans w along (cos rot, -sin rot) and d along (sin rot, cos rot) on the ground)
+func _footprints_touch(ax: float, az: float, arot: float, asize: String, bx: float, bz: float, brot: float, bsize: String, gap: float) -> bool:
+	var A: Dictionary = SIZES[asize]
+	var B: Dictionary = SIZES[bsize]
+	var a1 := Vector2(cos(arot), -sin(arot))
+	var a2 := Vector2(sin(arot), cos(arot))
+	var b1 := Vector2(cos(brot), -sin(brot))
+	var b2 := Vector2(sin(brot), cos(brot))
+	var d := Vector2(bx - ax, bz - az)
+	if d.length() > 0.5 * (sqrt(A.w * A.w + A.d * A.d) + sqrt(B.w * B.w + B.d * B.d)) + gap:
+		return false   # too far apart for any turn to touch: skip the axis tests
+	for n in [a1, a2, b1, b2]:
+		var ra: float = absf(a1.dot(n)) * A.w / 2 + absf(a2.dot(n)) * A.d / 2
+		var rb: float = absf(b1.dot(n)) * B.w / 2 + absf(b2.dot(n)) * B.d / 2
+		if absf(d.dot(n)) > ra + rb + gap:
+			return false
+	return true
+
+
 ## Settle a parcel near (x, z): if anything higher than its support overlaps its footprint (a parcel beside it,
 ## a plinth or kerb it only partly covers, a wall), or it stands across a step in the ground, it slides away
 ## from that until it is clear, then rests on what carries its centre. Returns (x, rest y, z).
@@ -274,10 +308,8 @@ func _settle_spot(rec: Dictionary, x: float, z: float, stack := true) -> Vector3
 			var qy: float = q.rest_y if q.get("flying", false) else q.pos.y
 			if qy + qh / 2 <= base + 0.03 or qy - qh / 2 >= base + h - 0.02:
 				continue   # below its support or above it
-			var dx: float = x - q.pos.x
-			var dz: float = z - q.pos.z
-			if absf(dx) < hx + q.hx - 0.03 and absf(dz) < hx + q.hz - 0.03:
-				var d := Vector2(dx, dz)
+			if _footprints_touch(x, z, rec.rot, rec.size, q.pos.x, q.pos.z, q.rot, q.size, GAP):
+				var d := Vector2(x - q.pos.x, z - q.pos.z)
 				push += d.normalized() if d.length() > 0.01 else Vector2(1, 0)
 		for sd in _solids_at(x, z):
 			if sd.top <= base + 0.03 or sd.bottom >= base + h - 0.02:
@@ -319,6 +351,8 @@ func update_gust(gust_t: float, gust: float, dt: float) -> void:
 					var S0: Dictionary = SIZES[rec.size]
 					rec.hx = maxf(S0.w, S0.d) * 0.45
 					rec.hz = rec.hx
+					f.yaw = rng.randf() * PI   # the way it will come to rest, known before choosing the spot
+					rec.rot = f.yaw
 					var spot := _settle_spot(rec, to.x, to.z)   # clear of kerb edges, neighbours and walls
 					to = Vector3(spot.x, to.y, spot.z)
 					f.to = to
@@ -334,7 +368,8 @@ func update_gust(gust_t: float, gust: float, dt: float) -> void:
 					continue
 				if not f.has("land_t"):   # touch down: pick the resting yaw, then bounce
 					f.land_t = gust_t
-					f.yaw = rng.randf() * PI
+					if not f.has("yaw"):
+						f.yaw = rng.randf() * PI
 					f.tilt_axis = Vector3(rng.randf() - 0.5, 0, rng.randf() - 0.5).normalized()
 				var tau: float = (gust_t - f.land_t) / BOUNCE_TIME
 				if tau < 1.0:
@@ -681,7 +716,7 @@ func _start_kick(rec: Dictionary, v: Vector3) -> void:
 func game_sound(n: int, power: float) -> void:
 	var g = get_parent()
 	if g != null and "sfx" in g and g.sfx != null:
-		g.sfx.play("land", -9.0 + minf(n, 4) * 1.5 + (2.0 if power > 1.5 else 0.0), rng.randf_range(1.1, 1.35))
+		g.sfx.parcel_roll(n, power)
 
 
 ## A parcel standing on the ground across a step (pavement edge to the street or the lawn) slides off it and
@@ -756,7 +791,8 @@ func update_kicks(dt: float) -> void:
 				continue
 			var ddx: float = q.pos.x - np.x
 			var ddz: float = q.pos.z - np.z
-			if absf(ddx) < hx + q.hx - 0.04 and absf(ddz) < hx + q.hz - 0.04:
+			var kf: Vector3 = k.basis * Vector3.FORWARD
+			if _footprints_touch(np.x, np.z, atan2(-kf.x, -kf.z), rec.size, q.pos.x, q.pos.z, q.rot, q.size, 0.0):
 				var away := Vector3(ddx, 0, ddz)
 				away = away.normalized() if away.length() > 0.01 else Vector3(v.x, 0, v.z).normalized()
 				var hs := Vector2(v.x, v.z).length()
@@ -774,12 +810,12 @@ func update_kicks(dt: float) -> void:
 				k.spin *= 0.5
 				np.y = rest
 			else:            # settle, upright, keeping the yaw it tumbled to (off a kerb edge if it straddles one)
+				var fwd: Vector3 = k.basis * Vector3.FORWARD
+				rec.rot = atan2(-fwd.x, -fwd.z)
 				var spot := _settle_spot(rec, np.x, np.z, false)
 				np.x = spot.x
 				np.z = spot.z
 				rest = spot.y
-				var fwd: Vector3 = k.basis * Vector3.FORWARD
-				rec.rot = atan2(-fwd.x, -fwd.z)
 				rec.pos = Vector3(np.x, rest, np.z)
 				rec.hx = maxf(SIZES[rec.size].w, SIZES[rec.size].d) * 0.45
 				rec.hz = rec.hx

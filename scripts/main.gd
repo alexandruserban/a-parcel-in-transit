@@ -704,7 +704,7 @@ func _smoke_test() -> void:
 	# every sound but the music runs through the Effects bus, which the Effects slider turns down
 	var fx_bus := AudioServer.get_bus_index(sfx.FX_BUS)
 	var off_bus := 0
-	for pl in sfx._pool + sfx.step_players + sfx.bell_players + [sfx.engine, sfx.ambient]:
+	for pl in sfx._pool + sfx.step_players + sfx.roll_players + sfx.bell_players + [sfx.engine, sfx.ambient]:
 		if pl.bus != sfx.FX_BUS:
 			off_bus += 1
 	var keep: float = sfx.effects_volume
@@ -918,7 +918,7 @@ func _count_overlaps() -> int:
 			if absf(a.pos.x - c.pos.x) > 1.2 or absf(a.pos.z - c.pos.z) > 1.2:
 				continue
 			var ch: float = parcels.SIZES[c.size].h
-			if absf(a.pos.x - c.pos.x) < a.hx + c.hx - 0.08 and absf(a.pos.z - c.pos.z) < a.hz + c.hz - 0.08 					and absf(a.pos.y - c.pos.y) < (ah + ch) / 2 - 0.08:
+			if absf(a.pos.y - c.pos.y) < (ah + ch) / 2 - 0.02 					and parcels._footprints_touch(a.pos.x, a.pos.z, a.rot, a.size, c.pos.x, c.pos.z, c.rot, c.size, -0.01):
 				n += 1
 	return n
 
@@ -1034,6 +1034,36 @@ func _kicks_test() -> void:
 	for wh in truck.wheels:
 		var c: Vector3 = wh.pivot.global_position
 		sink = maxf(sink, world.ground_y_at(c.x, c.z) - (c.y - 0.5))
+	# the truck nosed 0.3 m into a lamp post (the rest of it in the clear) must still be able to back out
+	var escaped := -1.0
+	var placed := false
+	for sd in world.solids:
+		var rr: Rect2 = sd.rect
+		if placed or absf(rr.size.x - 0.7) > 0.01 or absf(rr.size.y - 0.7) > 0.01 or absf(sd.top - 4.3) > 0.01:
+			continue
+		var pc: Vector2 = rr.get_center()
+		for a in 16:
+			var hd := TAU * a / 16.0
+			var f := Vector2(cos(hd), sin(hd))
+			var p := pc - f * (2.6 + 0.35 + 1.2 - 0.3)
+			var rear: float = truck._circle_depth(p.x - f.x * 2.6, p.y - f.y * 2.6, 1.2) + truck._circle_depth(p.x - f.x * 5.2, p.y - f.y * 5.2, 1.2)
+			if truck._circle_depth(p.x, p.y, 1.2) == 0.0 and rear == 0.0 and truck._circle_depth(p.x + f.x * 2.6, p.y + f.y * 2.6, 1.2) > 0.2:
+				truck.heading = hd
+				truck.pos = p
+				placed = true
+				break
+	if placed:
+		truck.speed = 0.0
+		var start_pos: Vector2 = truck.pos
+		truck.enter()
+		player.move_input = Vector2(0, 1)   # reverse
+		for i in 120:
+			await get_tree().physics_frame
+		player.move_input = Vector2.ZERO
+		escaped = truck.pos.distance_to(start_pos)
+		truck.speed = 0.0
+		truck.exit()
+	print("KICKS: truck backing away from a lamp post it had run into: moved %.1f m" % escaped)
 	var overlaps_end := _count_overlaps()
 	# a knocked parcel never ends up on top of another (only the wind may stack them)
 	var kicked_on_top := 0
@@ -1049,7 +1079,7 @@ func _kicks_test() -> void:
 	print("KICKS: parcels inside one another: %d at the start, %d after all the knocking" % [overlaps_start, overlaps_end])
 	print("KICKS: parcels hanging across a kerb edge: %d; truck half on the pavement: ride %.2f m, roll %.1f deg, deepest wheel sinks %.2f m" % [straddle, truck.ride_y, rad_to_deg(truck.ride_roll), sink])
 	print("KICKS: truck plough: up to %d parcels tumbling at once; avg %d us, worst %d us per frame; %d still moving after, %d left floating" % [tmoving, tt / maxi(tf, 1), tw, still, floating])
-	get_tree().quit(0 if moved > 0 and still == 0 and floating == 0 and straddle == 0 and sink < 0.08 and kicked_on_top == 0 and overlaps_end == 0 else 1)
+	get_tree().quit(0 if moved > 0 and still == 0 and floating == 0 and straddle == 0 and sink < 0.08 and kicked_on_top == 0 and overlaps_end == 0 and escaped > 1.0 else 1)
 
 
 ## Walk from the Ulmenstraße onto its pavement at walking speed, head-on and at a slant, and off again

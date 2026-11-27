@@ -703,6 +703,38 @@ func blocked(x: float, z: float, r: float, include_truck := false) -> bool:
 	return false
 
 
+## How deep the truck at (x, z) facing h overlaps anything solid: summed over the three circles down its length
+func _overlap(x: float, z: float, h: float) -> float:
+	var sum := 0.0
+	for o in [-2.6, 0.0, 2.6]:
+		sum += _circle_depth(x + cos(h) * o, z + sin(h) * o, 1.2)
+	return sum
+
+
+## How far a circle of radius r at (x, z) reaches into the town's solids, the ponds or past the wall (0 = clear)
+func _circle_depth(x: float, z: float, r: float) -> float:
+	if not _grid_built:
+		_build_grid()
+	var depth := 0.0
+	var F: float = world.FENCE - 0.5
+	depth = maxf(depth, absf(x) - (F - r))
+	depth = maxf(depth, absf(z) - (F - r))
+	for cx in range(floori((x - r) / 16.0), floori((x + r) / 16.0) + 1):
+		for cz in range(floori((z - r) / 16.0), floori((z + r) / 16.0) + 1):
+			for rc in _grid.get(Vector2i(cx, cz), []):
+				var rr: Rect2 = rc
+				var qx := clampf(x, rr.position.x, rr.end.x)
+				var qz := clampf(z, rr.position.y, rr.end.y)
+				var d := sqrt((x - qx) * (x - qx) + (z - qz) * (z - qz))
+				if d < r:
+					depth = maxf(depth, r - d + (0.5 if rr.has_point(Vector2(x, z)) else 0.0))
+	for l in world.lakes:
+		var k := sqrt(pow((x - l.cx) / (l.rw + r), 2) + pow((z - l.cz) / (l.rd + r), 2))
+		if k < 1.0:
+			depth = maxf(depth, (1.0 - k) * r)
+	return maxf(depth, 0.0)
+
+
 # ---------------------------------------------------------------- per frame
 func _key(a: Key, b := KEY_NONE) -> bool:
 	return Input.is_physical_key_pressed(a) or (b != KEY_NONE and Input.is_physical_key_pressed(b))
@@ -742,11 +774,11 @@ func _physics_process(dt: float) -> void:
 		var nh := heading + dh
 		var nx := pos.x + cos(nh) * speed * dt
 		var nz := pos.y + sin(nh) * speed * dt
-		var hit := false
-		for o in [-2.6, 0.0, 2.6]:
-			if blocked(nx + cos(nh) * o, nz + sin(nh) * o, 1.2):
-				hit = true
-				break
+		# refuse a move only if it pushes the truck further into something: once a corner has brushed a lamp post
+		# or a wall, backing out or turning away must still work (it used to count as blocked too, and stuck)
+		var now_in := _overlap(pos.x, pos.y, heading)
+		var then_in := _overlap(nx, nz, nh)
+		var hit := then_in > 0.0005 and then_in >= now_in - 0.0005
 		if hit:
 			if absf(speed) > 3.0:
 				game.sfx.play("land", -4.0)

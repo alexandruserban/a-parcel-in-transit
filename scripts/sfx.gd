@@ -157,7 +157,51 @@ var _step_i := 0
 var _step_last := {"grass": -1, "stone": -1}
 
 
+## A parcel knocked over: one of the knocks-and-rolls in assets/music/sounds/parcel-rolling.mp3, each cut by its
+## start [s], measured peak and length (the papery synthesised bump stands in if the file is missing)
+const ROLL_FILE := "res://assets/music/sounds/parcel-rolling.mp3"
+const ROLL_CUTS := [[0.205, 1.0, 0.56], [2.005, 0.7, 0.36], [4.205, 0.49, 0.27], [6.7, 0.75, 0.43], [8.065, 0.83, 0.35]]
+const ROLL_DB := 2.0   # knocks peak near -9 dB at the default effects level, just under the footsteps
+var roll_stream: AudioStream
+var roll_players: Array[AudioStreamPlayer] = []
+var _roll_i := 0
+var _roll_last := -1
+
+
+func parcel_roll(count: int, power: float) -> void:
+	if not enabled:
+		return
+	if roll_stream == null:
+		play("parcel_bump", -8.0 + minf(count, 4) * 1.2 + (2.0 if power > 1.4 else 0.0), rng.randf_range(0.9, 1.15))
+		return
+	var i := rng.randi() % ROLL_CUTS.size()
+	if i == _roll_last:
+		i = (i + 1) % ROLL_CUTS.size()
+	_roll_last = i
+	var c: Array = ROLL_CUTS[i]
+	var p := roll_players[_roll_i]
+	_roll_i = (_roll_i + 1) % roll_players.size()
+	var db: float = ROLL_DB + linear_to_db(0.8 / float(c[1])) + minf(count - 1, 3) * 1.0 + (2.0 if power > 1.4 else 0.0)
+	p.stream = roll_stream
+	p.pitch_scale = rng.randf_range(0.92, 1.08)
+	p.volume_db = db
+	p.set_meta("db", db)
+	p.set_meta("end", Time.get_ticks_msec() / 1000.0 + (float(c[2]) + 0.08) / p.pitch_scale)
+	p.play(float(c[0]))
+
+
 func _load_steps() -> void:
+	if ResourceLoader.exists(ROLL_FILE):
+		roll_stream = load(ROLL_FILE)
+	elif FileAccess.file_exists(ROLL_FILE):
+		var m := AudioStreamMP3.new()
+		m.data = FileAccess.get_file_as_bytes(ROLL_FILE)
+		roll_stream = m
+	for i in 3:
+		var rp := AudioStreamPlayer.new()
+		rp.bus = FX_BUS
+		add_child(rp)
+		roll_players.append(rp)
 	for key in STEP_FILES:
 		var path: String = STEP_FILES[key]
 		var s: AudioStream = null
@@ -179,7 +223,7 @@ func _load_steps() -> void:
 ## Fade out and stop recorded steps at the end of their cut
 func _update_steps() -> void:
 	var now := Time.get_ticks_msec() / 1000.0
-	for p in step_players:
+	for p in step_players + roll_players:
 		if not p.playing or not p.has_meta("end"):
 			continue
 		var left: float = p.get_meta("end") - now
@@ -654,6 +698,24 @@ func _build() -> void:
 			d[i] += creak[i]
 		streams["door_open" if opening else "door_close"] = _wav(d)
 	_build_drawbridge()
+	# a parcel knocked over: a light cardboard tap and a crisp papery rustle (tiny high clicks), no low thud
+	var pb := _buf(0.16)
+	for i in pb.size():
+		var t := float(i) / RATE
+		pb[i] = (rng.randf() * 2.0 - 1.0) * exp(-t * 55.0) * minf(1.0, t / 0.002) * 0.5
+	pb = _biquad(pb, "band", 1100.0, 0.9)
+	var crinkle := _buf(0.16)
+	var tc := 0.004
+	while tc < 0.12:
+		var j0 := int(tc * RATE)
+		var amp := rng.randf_range(0.3, 1.0) * (1.0 - tc / 0.14)
+		for i in mini(int(0.0025 * RATE), crinkle.size() - j0):
+			crinkle[j0 + i] += (rng.randf() * 2.0 - 1.0) * amp * exp(-float(i) / RATE * 900.0)
+		tc += rng.randf_range(0.006, 0.02)
+	crinkle = _biquad(crinkle, "band", 4200.0, 0.7)
+	for i in pb.size():
+		pb[i] += crinkle[i] * 1.6
+	streams.parcel_bump = _wav(_normalize(pb, 0.8))
 	# Horn: two square waves, a major third apart
 	var horn := _buf(0.6)
 	for f in [349.0, 440.0]:
