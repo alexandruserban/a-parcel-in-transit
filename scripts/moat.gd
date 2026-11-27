@@ -172,7 +172,7 @@ func _drawbridge() -> void:
 		ring.outer_radius = 0.29
 		b.mesh(Transform3D(Basis(Vector3.RIGHT, PI / 2), Vector3(s * 3.0, 8.4, zH - 0.08)), ring, iron, false)
 	# stone abutment on the far bank
-	w.bx(I, 0, -0.05, -m1 - 0.3, BW + 1.6, 0.25, 1.2, w.mats.palestone)
+	w.bx(I, 0, -0.14, -m1 - 0.3, BW + 1.6, 0.25, 1.2, w.mats.palestone)   # top just under the deck's end
 	# rails along the bridge sides (players can't step off into the water)
 	for s in [-1.0, 1.0]:
 		w.solid(I, Vector3(s * BW / 2, 0.65, (zH - m1) / 2), Vector3(0.3, 1.3, m1 - m0 + 0.4))
@@ -205,7 +205,7 @@ func _drawbridge() -> void:
 		bridge.target = PI / 2 * 0.98 if bridge.target == 0.0 else 0.0
 		var up: bool = bridge.target != 0.0
 		item.prompt = "[E] Pull the lever: lower the drawbridge" if up else "[E] Pull the lever: raise the drawbridge"
-		return {"title": "Drawbridge", "sound": "door_open" if up else "door_close",
+		return {"title": "Drawbridge", "sound": "drawbridge_up" if up else "drawbridge_down",
 			"message": "Chains clank and the drawbridge swings up, shutting the Nordtor." if up else "The drawbridge creaks down across the moat. The bridgehead and its towers are open again."}
 	w.interactables.append(item)
 	update(0.0)

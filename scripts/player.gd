@@ -11,6 +11,7 @@ const GRAVITY := 22.0
 const EYE := 1.7
 const EYE_CROUCH := 1.05
 const STEP := 0.45
+const MIN_STEP := 0.12   # lower lips are climbed by sliding (floor_max_angle), not by the step-up
 const SENSITIVITY := 0.0022
 const MAP_LIMIT := 184.0
 
@@ -190,7 +191,9 @@ func _try_step(motion: Vector3) -> bool:
 	if col.get_normal().y < 0.7:
 		return false
 	var rise := STEP + col.get_travel().y   # travel is negative: how far down the top of the step is
-	if rise < 0.03 or rise > STEP:
+	# lips lower than ~12 cm (thresholds, the drawbridge deck) the round foot of the capsule rides over by itself;
+	# stepping onto them from 30 cm away would lift you early, gravity would pull you back, and the view twitches
+	if rise < MIN_STEP or rise > STEP:
 		return false
 	# move this frame's distance, lifted onto the step (plus a hair, so we don't start inside it)
 	var dest := t

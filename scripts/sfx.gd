@@ -314,6 +314,63 @@ func _amp(s: PackedFloat32Array, k: float) -> PackedFloat32Array:
 	return s
 
 
+## Drawbridge: up - a winch ratcheting round, chain links rattling over it, the timbers creaking, a low rumble,
+## and a heavy thud as the bridge shuts against the gate; down - creaks and a running chain, ending in a boom
+## as the deck lands on the far bank
+func _build_drawbridge() -> void:
+	for up in [true, false]:
+		var dur := 3.6
+		var s := _buf(dur)
+		var r := RandomNumberGenerator.new()
+		r.seed = 31 if up else 37
+		var run := 2.9                        # the bridge moving
+		# chain links: short metallic clinks (inharmonic partials), quick when the bridge is light, slower near the end
+		var t := 0.05
+		while t < run:
+			var gain := r.randf_range(0.5, 1.0) * (1.0 - 0.5 * t / run)
+			var f0 := r.randf_range(1900.0, 2600.0)
+			var i0 := int(t * RATE)
+			for i in mini(int(0.06 * RATE), s.size() - i0):
+				var tt := float(i) / RATE
+				var e := exp(-tt * 70.0) * gain * 0.22
+				s[i0 + i] += e * (sin(TAU * f0 * tt) + 0.6 * sin(TAU * f0 * 1.47 * tt) + 0.4 * sin(TAU * f0 * 2.31 * tt))
+			t += r.randf_range(0.05, 0.11) * (1.0 + t / run)
+		# winch pawl ratchet (up only): a regular dull clack
+		if up:
+			t = 0.1
+			while t < run:
+				var i0 := int(t * RATE)
+				for i in mini(int(0.03 * RATE), s.size() - i0):
+					var tt := float(i) / RATE
+					s[i0 + i] += (r.randf() * 2.0 - 1.0) * exp(-tt * 160.0) * 0.5
+				t += 0.24
+		# timber creak: a slowly wandering, low-passed buzz in two swells
+		var creak := _buf(dur)
+		var ph := 0.0
+		for i in int(run * RATE):
+			var tt := float(i) / RATE
+			var f := 140.0 + 60.0 * sin(tt * 2.3) + 25.0 * sin(tt * 7.1)
+			ph += f / RATE
+			var env := (0.5 + 0.5 * sin(tt * 2.1 - 1.2)) * minf(1.0, tt / 0.3) * minf(1.0, (run - tt) / 0.3)
+			creak[i] = _saw(ph) * env * 0.18
+		creak = _biquad(creak, "band", 650.0, 1.2)
+		# rumble of the moving deck and winch drum
+		var rum := _buf(dur)
+		for i in int(run * RATE):
+			var tt := float(i) / RATE
+			rum[i] = (r.randf() * 2.0 - 1.0) * minf(1.0, tt / 0.4) * minf(1.0, (run - tt) / 0.4) * 0.9
+		rum = _biquad(_biquad(rum, "low", 160.0, 0.7), "low", 160.0, 0.7)
+		for i in s.size():
+			s[i] += creak[i] + rum[i]
+		# the end: a heavy wooden thud (up: against the gate) or a deeper boom (down: on the far bank)
+		var i0 := int(run * RATE)
+		var bf := 70.0 if up else 52.0
+		for i in s.size() - i0:
+			var tt := float(i) / RATE
+			s[i0 + i] += (sin(TAU * bf * tt * (1.0 - 0.3 * minf(tt / 0.4, 1.0))) * 0.9 + (r.randf() * 2.0 - 1.0) * 0.35 * exp(-tt * 40.0)) * exp(-tt * 7.0) * minf(1.0, tt * 600.0)
+		streams["drawbridge_up" if up else "drawbridge_down"] = _wav(_normalize(s, 0.9))
+
+
 ## Scale a sound so its loudest sample reaches `peak`
 func _normalize(s: PackedFloat32Array, peak: float) -> PackedFloat32Array:
 	var m := 0.0
@@ -377,22 +434,22 @@ static func _saw(ph: float) -> float:
 
 func _build() -> void:
 	rng.seed = 99
-	var tap := _buf(0.09)
-	var tph := 0.0
-	for i in tap.size():
+	# pavement: a shoe on stone - no pitched tap (that read as a wooden foot), just a soft gritty heel scuff, a
+	# quieter toe scuff after it, and a dull body of low-passed noise for the weight
+	var fall := _buf(0.16)
+	for part in [[0.0, 1.0, 70.0], [0.055, 0.45, 90.0]]:   # [start s, gain, decay]
+		var j0 := int(part[0] * RATE)
+		for i in fall.size() - j0:
+			var t := float(i) / RATE
+			fall[j0 + i] += (rng.randf() * 2.0 - 1.0) * part[1] * exp(-t * part[2]) * minf(1.0, t / 0.002)
+	fall = _biquad(_biquad(fall, "band", 1500.0, 0.6), "low", 2600.0, 0.7)
+	var body := _buf(0.16)
+	for i in body.size():
 		var t := float(i) / RATE
-		tph += (260.0 * pow(80.0 / 260.0, minf(t / 0.07, 1.0))) / RATE
-		var tri_w := 4.0 * absf(tph - floorf(tph + 0.5)) - 1.0
-		tap[i] = (tri_w * 0.55 + (rng.randf() * 2.0 - 1.0) * 0.06) * exp(-t * 55.0) * minf(1.0, t * 800.0)
-	# pavement: a muffled footfall - a soft thump with a dull scuff of low-passed noise, eased in so it doesn't click
-	var fall := _buf(0.13)
+		body[i] = (rng.randf() * 2.0 - 1.0) * exp(-t * 35.0) * minf(1.0, t / 0.003)
+	body = _biquad(_biquad(body, "low", 220.0, 0.7), "low", 220.0, 0.7)
 	for i in fall.size():
-		var t := float(i) / RATE
-		fall[i] = (rng.randf() * 2.0 - 1.0) * exp(-t * 38.0) * minf(1.0, t / 0.004)
-	fall = _biquad(_biquad(fall, "low", 750.0, 0.6), "low", 750.0, 0.6)
-	var thump := _biquad(tap, "low", 500.0, 0.707)
-	for i in fall.size():
-		fall[i] = fall[i] * 1.6 + (thump[i] if i < thump.size() else 0.0) * 1.2
+		fall[i] = fall[i] * 1.3 + body[i] * 3.0
 	streams.step_hard = _wav(_normalize(fall, 0.9))
 	# grass: a soft rustle (noise round 1.6 kHz, eased in and out) with a dull thud under it
 	var brush := _buf(0.2)
@@ -487,6 +544,7 @@ func _build() -> void:
 		for i in d.size():
 			d[i] += creak[i]
 		streams["door_open" if opening else "door_close"] = _wav(d)
+	_build_drawbridge()
 	# Horn: two square waves, a major third apart
 	var horn := _buf(0.6)
 	for f in [349.0, 440.0]:

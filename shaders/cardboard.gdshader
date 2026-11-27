@@ -21,14 +21,6 @@ void fragment() {
 	if (n.y > 0.5) uv = q.xz;
 	else if (n.x > 0.5) uv = vec2(lnorm.x > 0.0 ? 1.0 - q.z : q.z, 1.0 - q.y);
 	else uv = vec2(lnorm.z > 0.0 ? q.x : 1.0 - q.x, 1.0 - q.y);
-	vec3 card = texture(card_tex, uv).rgb;
-	if (COLOR.a < 0.5) {
-		// printed mailing box: the colour over the card's grain (its brightness, scaled round 1); tape and
-		// edges stay darker
-		float lum = dot(card, vec3(0.299, 0.587, 0.114));
-		ALBEDO = COLOR.rgb * clamp(lum / 0.55, 0.55, 1.15);
-	} else {
-		ALBEDO = card * COLOR.rgb;
-	}
+	ALBEDO = texture(card_tex, uv).rgb * COLOR.rgb;
 	ROUGHNESS = 0.85;
 }

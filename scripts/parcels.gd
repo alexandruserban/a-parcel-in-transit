@@ -105,7 +105,8 @@ func build() -> void:
 		mm.mesh = mesh
 		mm.instance_count = list.size() + SPARE
 		for i in mm.instance_count:
-			mm.set_instance_color(i, _box_color())
+			var tint := 0.82 + rng.randf() * 0.22
+			mm.set_instance_color(i, Color(tint, tint * (0.95 + rng.randf() * 0.05), tint * (0.85 + rng.randf() * 0.12)))
 			mm.set_instance_transform(i, HIDDEN)
 		var mi := MultiMeshInstance3D.new()
 		mi.multimesh = mm
@@ -129,19 +130,6 @@ func _free_spot(x: float, z: float, r: float) -> bool:
 		if s.top > 0.5 and s.bottom < 1.0 and world.in_rect(s.rect, x, z, r):
 			return false
 	return true
-
-
-## Box colours: mostly kraft card in shades from pale to dark brown; one in six is a printed mailing box
-## (alpha < 0.5 tells the shader to paint it that colour over the card's grain instead of tinting it)
-const KRAFT := ["#fff1dc", "#f2dcc0", "#e6c7a0", "#d9b38a", "#c9a07a", "#b88b66", "#a87a58", "#f7e6cf"]
-const PRINTED := ["#f2efe8", "#b8432f", "#3f6c94", "#5b8a4a", "#e0b23a", "#7a5a8e", "#2f3a46"]
-func _box_color() -> Color:
-	if rng.randf() < 0.16:
-		var c := Color(PRINTED[rng.randi() % PRINTED.size()])
-		c.a = 0.0
-		return c
-	var k := Color(KRAFT[rng.randi() % KRAFT.size()])
-	return k * (0.94 + rng.randf() * 0.1)
 
 
 ## Position a parcel record and show its instance

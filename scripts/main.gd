@@ -877,6 +877,47 @@ func _kerb_test() -> void:
 		await get_tree().physics_frame
 	player.move_input = Vector2.ZERO
 	print("KERB: back on the road at x %.2f, y %.2f" % [player.global_position.x, player.global_position.y])
+	# no twitching: walk over the drawbridge and in at a front door, counting up-and-down bounces of the player
+	var bounce_walk := func(from: Vector3, dir: Vector2, secs: float) -> int:
+		player.global_position = from
+		for i in 10:
+			await get_tree().physics_frame
+		player.yaw = 0.0
+		player.move_input = dir
+		var ys: Array = []
+		var t := 0.0
+		var floor_toggles := 0
+		var was_floor: bool = player.is_on_floor()
+		while t < secs:
+			await get_tree().physics_frame
+			t += get_physics_process_delta_time()
+			ys.append(player.global_position.y)
+			if player.is_on_floor() != was_floor:
+				floor_toggles += 1
+				was_floor = player.is_on_floor()
+		player.move_input = Vector2.ZERO
+		print("KERB:   on-floor toggled %d times" % floor_toggles)
+		var flips := 0
+		var last := 0
+		for i in range(1, ys.size()):
+			var dy: float = ys[i] - ys[i - 1]
+			var sgn := 0 if absf(dy) < 0.004 else (1 if dy > 0.0 else -1)
+			if sgn != 0 and last != 0 and sgn != last:
+				flips += 1
+			if sgn != 0:
+				last = sgn
+		return flips
+	var bridge_flips: int = await bounce_walk.call(Vector3(0.5, 0.1, -187.0), Vector2(0, -1), 2.2)
+	var hx: Transform3D = world.house_parts.interiors[3].xf
+	for it in world.interactables:   # open that house's front door
+		if it.type == "door" and it.pos.distance_to(hx * Vector3(0, 1.4, 7)) < 0.1:
+			it.call.call()
+	await get_tree().create_timer(1.0).timeout
+	var door_from: Vector3 = hx * Vector3(0.0, 0.1, 10.0)
+	var into: Vector3 = (hx.basis * Vector3(0, 0, -1)).normalized()
+	var door_flips: int = await bounce_walk.call(door_from, Vector2(into.x, into.z), 1.6)
+	print("KERB: up-and-down bounces walking over the drawbridge %d, in at a front door %d" % [bridge_flips, door_flips])
+	ok = ok and bridge_flips <= 2 and door_flips <= 2
 	print("KERB: %s" % ("ok" if ok else "FAILED"))
 	get_tree().quit(0 if ok else 1)
 
@@ -1008,6 +1049,13 @@ func _screenshot_mode() -> void:
 		[Vector3(14, 2.0, -158), "cam", Vector3(0, 13.0, -182), 22.5, "nordtor_night", 60.0],
 	])
 	_shots.append([Vector3(-160, 2.4, 14), "cam", Vector3(-172, 0.5, -10), 13.0, "depot_full", 70.0])
+	_shots.append([Vector3(-4.0, 0.0, 0.5), "hcam", Vector3(0.2, 1.7, 6.0), 14.0, "floor_in", 75.0, 0])
+	_shots.append([Vector3(-4.0, 0.0, 2.5), "hcam", Vector3(0.0, 1.7, 9.5), 14.0, "floor_entry", 75.0, 3])
+	_shots.append([Vector3(0.3, 1.7, -186.5), "cam", Vector3(0, 0, -200), 15.0, "bridge_on", 75.0])
+	_shots.append([Vector3(1.5, 1.7, -196.0), "cam", Vector3(-1, 0, -203), 15.0, "bridge_mid", 75.0])
+	_shots.append([Vector3(0.0, 0.0, -2.0), "hcam", Vector3(0.0, 1.7, 9.0), 14.0, "floor_door", 75.0, 0])
+	_shots.append([Vector3(0, 0, -205), "cam", Vector3(0.5, 1.7, -186.5), 15.0, "bridge_walk", 75.0])
+	_shots.append([Vector3(0, 0, -191), "cam", Vector3(0.3, 1.7, -208.0), 15.0, "bridge_back", 75.0])
 	_shots.append([Vector3(-44, 1.7, 18), "cam", Vector3(-38, 0.3, 8), 14.0, "parcel_colours", 70.0])
 	# `--only a,b` renders just the named views
 	var args := OS.get_cmdline_user_args()
@@ -1065,5 +1113,8 @@ func _screenshot_mode() -> void:
 			hud.show_menu(false)
 		var path: String = OS.get_cmdline_user_args()[OS.get_cmdline_user_args().find("--shot") + 1] if OS.get_cmdline_user_args().size() > 1 else "user://"
 		img.save_png(path.path_join("shot_%s.png" % s[4]))
+		if "--pair" in OS.get_cmdline_user_args():   # and the very next frame, to look for flicker
+			await get_tree().process_frame
+			get_viewport().get_texture().get_image().save_png(path.path_join("shot_%s_b.png" % s[4]))
 		print("saved shot ", s[4])
 	get_tree().quit()
